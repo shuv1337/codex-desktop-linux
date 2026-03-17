@@ -627,8 +627,8 @@ Environment overrides:
   CODEX_PROXY_ENV_FILE=/path/to/proxy.env
   CODEX_USER_DATA_DIR=/custom/profile/path
   CODEX_APP_SERVER_FORCE_CLI=1
-  CODEX_APP_SERVER_LISTEN_URL=ws://0.0.0.0:8390
-  CODEX_APP_SERVER_WS_URL=ws://0.0.0.0:8390
+  CODEX_APP_SERVER_LISTEN_URL=ws://0.0.0.0:9234
+  CODEX_APP_SERVER_WS_URL=ws://0.0.0.0:9234
   CODEX_APP_SERVER_WS_SOCKS_PROXY=
 EOF
 }
@@ -992,7 +992,7 @@ start_listening_app_server() {
 }
 
 configure_app_server_transport() {
-    local listen_url="${CODEX_APP_SERVER_LISTEN_URL:-ws://0.0.0.0:8390}"
+    local listen_url="${CODEX_APP_SERVER_LISTEN_URL:-ws://0.0.0.0:9234}"
     local connect_url="${CODEX_APP_SERVER_WS_URL:-$listen_url}"
 
     if [ "${CODEX_APP_SERVER_FORCE_CLI:-0}" = "1" ]; then
@@ -1081,8 +1081,8 @@ case "$ACTION" in
             echo "App server transport: stdio"
         else
             echo "App server transport: websocket"
-            echo "App server listen URL: ${CODEX_APP_SERVER_LISTEN_URL:-ws://0.0.0.0:8390}"
-            echo "App server connect URL: ${CODEX_APP_SERVER_WS_URL:-${CODEX_APP_SERVER_LISTEN_URL:-ws://0.0.0.0:8390}}"
+            echo "App server listen URL: ${CODEX_APP_SERVER_LISTEN_URL:-ws://0.0.0.0:9234}"
+            echo "App server connect URL: ${CODEX_APP_SERVER_WS_URL:-${CODEX_APP_SERVER_LISTEN_URL:-ws://0.0.0.0:9234}}"
             echo "App server log: ${CODEX_APP_SERVER_LOG_FILE:-$APP_SERVER_STATE_DIR/app-server.log}"
             if [ -n "${CODEX_APP_SERVER_WS_SOCKS_PROXY:-}" ]; then
                 echo "App server ws socks proxy: ${CODEX_APP_SERVER_WS_SOCKS_PROXY}"

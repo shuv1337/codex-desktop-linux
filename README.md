@@ -142,22 +142,22 @@ By default, launching the app now starts a shared Codex app-server websocket lis
 Default behavior:
 
 ```bash
-codex app-server --analytics-default-enabled --listen ws://0.0.0.0:8390
+codex app-server --analytics-default-enabled --listen ws://0.0.0.0:9234
 ```
 
 Default launcher environment:
 
 ```bash
-CODEX_APP_SERVER_LISTEN_URL=ws://0.0.0.0:8390
-CODEX_APP_SERVER_WS_URL=ws://0.0.0.0:8390
+CODEX_APP_SERVER_LISTEN_URL=ws://0.0.0.0:9234
+CODEX_APP_SERVER_WS_URL=ws://0.0.0.0:9234
 ```
 
 This allows the same app-server to be used by:
 
 - the local desktop app
-- other clients that can reach port `8390`
+- other clients that can reach port `9234`
 
-Note: `0.0.0.0` is a **bind address**, not a routable remote address. Remote clients should connect to the machine's actual IP or DNS name, for example `ws://192.168.1.50:8390`.
+Note: `0.0.0.0` is a **bind address**, not a routable remote address. Remote clients should connect to the machine's actual IP or DNS name, for example `ws://192.168.1.50:9234`.
 
 Useful controls:
 
@@ -166,8 +166,8 @@ Useful controls:
 ./codex-app/start.sh status
 
 # Override the listen/connect URL
-CODEX_APP_SERVER_LISTEN_URL=ws://0.0.0.0:8390 ./codex-app/start.sh
-CODEX_APP_SERVER_WS_URL=ws://0.0.0.0:8390 ./codex-app/start.sh
+CODEX_APP_SERVER_LISTEN_URL=ws://0.0.0.0:9234 ./codex-app/start.sh
+CODEX_APP_SERVER_WS_URL=ws://0.0.0.0:9234 ./codex-app/start.sh
 
 # Fall back to the older stdio-spawned app-server behavior
 CODEX_APP_SERVER_FORCE_CLI=1 ./codex-app/start.sh
@@ -200,7 +200,7 @@ CODEX_APP_SERVER_WS_SOCKS_PROXY= ./codex-app/start.sh
 CODEX_APP_SERVER_WS_SOCKS_PROXY=socks5h://127.0.0.1:1080 ./codex-app/start.sh
 ```
 
-For the default `ws://0.0.0.0:8390` setup, no SOCKS proxy is used.
+For the default `ws://0.0.0.0:9234` setup, no SOCKS proxy is used.
 
 ### API / proxy configuration
 
@@ -281,7 +281,7 @@ A small Python HTTP server is used as a workaround: when `app.isPackaged` is `fa
 | `CODEX_CLI_PATH` error | Install CLI: `npm i -g @openai/codex` |
 | `Error: app-server listener did not become ready` | Check `~/.config/codex-desktop-linux/app-server/app-server.log`; confirm the bind target in `CODEX_APP_SERVER_LISTEN_URL` is valid for this machine |
 | `API mode selected, but no proxy token was found` | Set `CODEX_PROXY_TOKEN`, or add `PROXY_AUTH_TOKEN=...` to `~/.config/codex-desktop-linux/proxy.env` |
-| Websocket listener works but remote clients still cannot connect | Verify firewall / port exposure for `8390`; binding to `0.0.0.0` only opens the listener, it does not publish the port through NAT/firewalls |
+| Websocket listener works but remote clients still cannot connect | Verify firewall / port exposure for `9234`; binding to `0.0.0.0` only opens the listener, it does not publish the port through NAT/firewalls |
 | Wrong login/session keeps showing up | Use `./codex-app/start-oauth.sh` or `./codex-app/start-api.sh` — each mode uses a separate profile dir |
 | Need the old direct stdio behavior | Run with `CODEX_APP_SERVER_FORCE_CLI=1 ./codex-app/start.sh` |
 | Need to disable websocket SOCKS routing | Run with `CODEX_APP_SERVER_WS_SOCKS_PROXY=` |

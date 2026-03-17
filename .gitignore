@@ -3,3 +3,5 @@
 Codex-Beta.zip
 node_modules/
 codex-app/
+.pi/
+main-*.js

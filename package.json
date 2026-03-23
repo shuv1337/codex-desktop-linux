@@ -6,6 +6,11 @@
   "description": "Codex",
   "main": ".vite/build/bootstrap.js",
   "scripts": {
+    "appcast:beta": "node scripts/appcast-metadata.mjs --channel beta",
+    "appcast:prod": "node scripts/appcast-metadata.mjs --channel prod",
+    "release:beta:dry": "node scripts/release/build-release.mjs --channel beta --dry-run",
+    "release:prod:dry": "node scripts/release/build-release.mjs --channel prod --dry-run",
+    "test:node": "node --test test/*.test.mjs",
     "compile": "pnpm exec tsgo -b",
     "tsc": "pnpm exec tsgo --noEmit",
     "dev": "pnpm --dir .. run generate:third-party-notices && cross-env NODE_ENV=development electron-forge start",

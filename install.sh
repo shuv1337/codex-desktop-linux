@@ -9,11 +9,11 @@ set -Eeuo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 INSTALL_DIR="${CODEX_INSTALL_DIR:-$SCRIPT_DIR/codex-app}"
 ELECTRON_VERSION="40.0.0"
-# Beta channel uses ZIP format; prod uses DMG
-BETA_ZIP_URL="https://persistent.oaistatic.com/codex-app-beta/Codex%20(Beta)-darwin-arm64-26.311.30926.zip"
-DMG_URL="https://persistent.oaistatic.com/codex-app-prod/Codex.dmg"
-# Default to beta channel
-APP_URL="${CODEX_APP_URL:-$BETA_ZIP_URL}"
+APPCAST_SCRIPT="$SCRIPT_DIR/scripts/appcast-metadata.mjs"
+BETA_APPCAST_URL="https://persistent.oaistatic.com/codex-app-beta/appcast.xml"
+PROD_APPCAST_URL="https://persistent.oaistatic.com/codex-app-prod/appcast.xml"
+DEFAULT_CHANNEL="${CODEX_CHANNEL:-beta}"
+APP_URL="${CODEX_APP_URL:-}"
 WORK_DIR="$(mktemp -d)"
 ARCH="$(uname -m)"
 
@@ -154,6 +154,75 @@ parse_metadata_field() {
     printf '%s\n' "$metadata" | awk -F= -v key="$key" '$1==key { sub(/^[^=]*=/, ""); print; exit }'
 }
 
+normalize_channel() {
+    case "$1" in
+        beta|prod)
+            printf '%s\n' "$1"
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+resolve_default_channel() {
+    local channel="${1:-$DEFAULT_CHANNEL}"
+    if ! channel="$(normalize_channel "$channel" 2>/dev/null)"; then
+        error "Unsupported CODEX_CHANNEL: ${1:-$DEFAULT_CHANNEL} (expected beta or prod)"
+    fi
+    printf '%s\n' "$channel"
+}
+
+fetch_appcast_metadata() {
+    local channel="$1"
+    local appcast_url=""
+
+    case "$channel" in
+        beta)
+            appcast_url="$BETA_APPCAST_URL"
+            ;;
+        prod)
+            appcast_url="$PROD_APPCAST_URL"
+            ;;
+        *)
+            error "Unknown channel for appcast metadata: $channel"
+            ;;
+    esac
+
+    [ -f "$APPCAST_SCRIPT" ] || error "Appcast helper not found: $APPCAST_SCRIPT"
+
+    node "$APPCAST_SCRIPT" --appcast-url "$appcast_url" --format shell
+}
+
+resolve_default_archive_url() {
+    local channel="$1"
+    local metadata
+    metadata="$(fetch_appcast_metadata "$channel")" || error "Failed to resolve latest $channel appcast metadata"
+
+    local archive_url version build file_name extension
+    archive_url="$(parse_metadata_field "$metadata" "archiveUrl")"
+    version="$(parse_metadata_field "$metadata" "version")"
+    build="$(parse_metadata_field "$metadata" "buildNumber")"
+    file_name="$(parse_metadata_field "$metadata" "archiveFileName")"
+    extension="$(parse_metadata_field "$metadata" "archiveExtension")"
+
+    [ -n "$archive_url" ] || error "Appcast metadata did not include archiveUrl"
+
+    info "Resolved $channel appcast: version=${version:-unknown}, build=${build:-unknown}, file=${file_name:-unknown}, type=${extension:-unknown}"
+    printf '%s\n' "$archive_url"
+}
+
+resolve_app_url() {
+    if [ -n "$APP_URL" ]; then
+        printf '%s\n' "$APP_URL"
+        return 0
+    fi
+
+    local channel
+    channel="$(resolve_default_channel "$DEFAULT_CHANNEL")"
+    resolve_default_archive_url "$channel"
+}
+
 get_dmg() {
     local dmg_dest="$SCRIPT_DIR/Codex.dmg"
     local remote_meta=""
@@ -267,15 +336,27 @@ extract_zip() {
     echo "$app_dir"
 }
 
-# ---- Download beta ZIP ----
+# ---- Download ZIP archive ----
 get_zip() {
-    local zip_dest="$SCRIPT_DIR/Codex-Beta.zip"
+    local zip_url="$1"
+    local zip_dest
+    local file_name
 
-    info "Downloading Codex Desktop Beta ZIP..."
-    info "URL: $APP_URL"
+    file_name="$(python3 - "$zip_url" <<'PY'
+from urllib.parse import urlparse, unquote
+import sys
+url = sys.argv[1]
+path = urlparse(url).path
+print(unquote(path.split('/')[-1] or 'Codex.zip'))
+PY
+)"
+    zip_dest="$SCRIPT_DIR/$file_name"
+
+    info "Downloading Codex Desktop ZIP..."
+    info "URL: $zip_url"
 
     if ! curl -L --progress-bar --max-time 600 --connect-timeout 30 \
-            -o "$zip_dest" "$APP_URL"; then
+            -o "$zip_dest" "$zip_url"; then
         rm -f "$zip_dest"
         error "Download failed. Download manually and place as: $zip_dest"
     fi
@@ -1284,10 +1365,14 @@ main() {
             info "Using provided archive: $archive_path"
         fi
     else
-        # Default to beta ZIP; use CODEX_APP_URL=<dmg-url> for prod channel
-        if [[ "$APP_URL" == *.zip ]]; then
-            archive_path=$(get_zip)
+        local resolved_app_url
+        resolved_app_url="$(resolve_app_url)"
+        info "Resolved default upstream archive: $resolved_app_url"
+
+        if [[ "$resolved_app_url" == *.zip ]]; then
+            archive_path=$(get_zip "$resolved_app_url")
         else
+            DMG_URL="$resolved_app_url"
             archive_path=$(get_dmg)
         fi
     fi

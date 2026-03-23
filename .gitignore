@@ -1,7 +1,10 @@
 *.dmg
 *.app/
 Codex-Beta.zip
+Codex (Beta)-darwin-arm64-*.zip
+.tmp-*.log
 node_modules/
 codex-app/
+dist/
 .pi/
 main-*.js

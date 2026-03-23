@@ -47,13 +47,31 @@ npm i -g @openai/codex
 
 ## Installation
 
-### Option A: Auto-download latest supported archive
+### Option A: Auto-download latest archive from the official appcast
 
 ```bash
 git clone https://github.com/ilysenko/codex-desktop-linux.git
 cd codex-desktop-linux
 chmod +x install.sh
 ./install.sh
+```
+
+By default, the installer resolves the latest **beta** archive from the official appcast.
+
+You can switch channels without editing the script:
+
+```bash
+# Latest beta archive (default)
+CODEX_CHANNEL=beta ./install.sh
+
+# Latest prod archive
+CODEX_CHANNEL=prod ./install.sh
+```
+
+You can still override the archive URL directly if needed:
+
+```bash
+CODEX_APP_URL=https://persistent.oaistatic.com/codex-app-beta/Codex%20(Beta)-darwin-arm64-26.320.11513.zip ./install.sh
 ```
 
 ### Option B: Provide your own archive or app bundle
@@ -65,6 +83,28 @@ You can pass a `.zip`, `.dmg`, or extracted `.app` bundle:
 ./install.sh /path/to/Codex.dmg
 ./install.sh "/path/to/Codex.app"
 ```
+
+## Release build scaffolding
+
+Phase 2 release scaffolding is now in place for dry-run metadata generation:
+
+```bash
+npm run release:beta:dry
+npm run release:prod:dry
+```
+
+These commands currently:
+
+- resolve the latest upstream appcast metadata
+- compute a release version/tag for our Linux artifacts
+- print the staged build metadata without running the full installer
+
+A non-dry run of the release builder now stages the installer output and emits:
+
+- a tarball of the staged `codex-app` directory
+- a `.sha256` checksum file
+- a `build-metadata.json` file
+- a packaged wrapper entrypoint named after the release package, which dispatches to the staged `start.sh` while keeping our richer launcher intact
 
 ## Usage
 

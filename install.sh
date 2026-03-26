@@ -543,43 +543,14 @@ PY
     fi
 }
 
-# ---- Patch local websocket app-server transport to avoid forced SOCKS proxy ----
-patch_local_websocket_app_server() {
+# ---- Patch extracted JS bundles used by the packaged app ----
+patch_app_bundles() {
     local extracted_root="$1"
-    local main_bundle
-    main_bundle=$(find "$extracted_root/.vite/build" -maxdepth 1 -type f -name "main-*.js" | head -1)
 
-    if [ -z "${main_bundle:-}" ] || [ ! -f "$main_bundle" ]; then
-        warn "Could not locate main bundle for websocket transport patch"
-        return
-    fi
-
-    if python3 - "$main_bundle" <<'PY'
-from pathlib import Path
-import sys
-
-p = Path(sys.argv[1])
-s = p.read_text(errors='ignore')
-
-helper = 'function __codexDesktopWsTransportOptions('
-if helper in s:
-    print('websocket transport patch already applied')
-    raise SystemExit(0)
-
-old = 'async connect(){const e=await Fv(this.options.hostConfig),t=new a.WebSocket(this.options.websocketUrl,{headers:e,agent:new a.distExports.SocksProxyAgent("socks5h://127.0.0.1:1080"),perMessageDeflate:!1});return new Yu(t)}}function Cv(r){'
-new = 'async connect(){const e=await Fv(this.options.hostConfig),t=new a.WebSocket(this.options.websocketUrl,{headers:e,...__codexDesktopWsTransportOptions(this.options.websocketUrl),perMessageDeflate:!1});return new Yu(t)}}function __codexDesktopWsTransportOptions(r){const e=process.env.CODEX_APP_SERVER_WS_SOCKS_PROXY,t=e===void 0?"socks5h://127.0.0.1:1080":e;if(!t)return{};try{const e=new URL(r),i=(e.hostname??"").toLowerCase(),n=i==="0.0.0.0"||i==="localhost"||i==="127.0.0.1"||i==="::1"||i.startsWith("10.")||i.startsWith("192.168.")||/^172\\.(1[6-9]|2\\d|3[0-1])\\./.test(i);return n?{}:{agent:new a.distExports.SocksProxyAgent(t)}}catch{return{agent:new a.distExports.SocksProxyAgent(t)}}}function Cv(r){'
-
-if old not in s:
-    raise SystemExit('websocket transport patch anchor not found')
-
-s = s.replace(old, new, 1)
-p.write_text(s)
-print('websocket transport patch applied')
-PY
-    then
-        info "Websocket transport patch applied"
+    if node "$SCRIPT_DIR/scripts/release/bundle-patches.mjs" "$extracted_root"; then
+        info "Packaged app bundle patches applied"
     else
-        warn "Websocket transport patch could not be applied (continuing)"
+        warn "Packaged app bundle patches could not be applied (continuing)"
     fi
 }
 
@@ -609,8 +580,8 @@ patch_asar() {
     # Enable Open In targets on Linux (VS Code, Cursor, Windsurf, etc.).
     patch_open_in_targets_linux "$WORK_DIR/app-extracted"
 
-    # Allow local/private websocket app-server listeners without forced SOCKS proxy.
-    patch_local_websocket_app_server "$WORK_DIR/app-extracted"
+    # Patch the packaged bundles for shared app-server auth and local websocket transport.
+    patch_app_bundles "$WORK_DIR/app-extracted"
 
     # Build native modules in clean environment and copy back
     build_native_modules "$WORK_DIR/app-extracted"

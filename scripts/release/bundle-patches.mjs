@@ -6,11 +6,17 @@ export const websocketTransportHelper = "function __codexDesktopWsTransportOptio
 export const websocketTransportOldSnippet = 'async connect(){const e=await Fv(this.options.hostConfig),t=new a.WebSocket(this.options.websocketUrl,{headers:e,agent:new a.distExports.SocksProxyAgent("socks5h://127.0.0.1:1080"),perMessageDeflate:!1});return new Yu(t)}}function Cv(r){';
 export const websocketTransportNewSnippet = 'async connect(){const e=await Fv(this.options.hostConfig),t=new a.WebSocket(this.options.websocketUrl,{headers:e,...__codexDesktopWsTransportOptions(this.options.websocketUrl),perMessageDeflate:!1});return new Yu(t)}}function __codexDesktopWsTransportOptions(r){const e=process.env.CODEX_APP_SERVER_WS_SOCKS_PROXY,t=e===void 0?"socks5h://127.0.0.1:1080":e;if(!t)return{};try{const e=new URL(r),i=(e.hostname??"").toLowerCase(),n=i==="0.0.0.0"||i==="localhost"||i==="127.0.0.1"||i==="::1"||i.startsWith("10.")||i.startsWith("192.168.")||/^172\\.(1[6-9]|2\\d|3[0-1])\\./.test(i);return n?{}:{agent:new a.distExports.SocksProxyAgent(t)}}catch{return{agent:new a.distExports.SocksProxyAgent(t)}}}function Cv(r){';
 export const websocketTransportDeeplinksOldSnippet = 'async connect(){let e=await Wte(this.options.hostConfig);return new wx(new iS(this.options.websocketUrl,{headers:e,agent:new Vte.SocksProxyAgent(`socks5h://127.0.0.1:1080`),perMessageDeflate:!1}))}};function Ute(e){';
+// 26.320+ (product-name bundle): uses backtick template literals and different variable names
+export const websocketTransportProductNameOldSnippet = 'async connect(){let e=await WT(this.options.hostConfig);return new Kw(new BT(this.options.websocketUrl,{headers:e,agent:new VT.SocksProxyAgent(`socks5h://127.0.0.1:1080`),perMessageDeflate:!1}))}};function UT(e){';
+export const websocketTransportProductNameNewSnippet = 'async connect(){let e=await WT(this.options.hostConfig);return new Kw(new BT(this.options.websocketUrl,{headers:e,...__codexDesktopWsTransportOptions(this.options.websocketUrl,VT.SocksProxyAgent),perMessageDeflate:!1}))}};function __codexDesktopWsTransportOptions(e,t){const n=process.env.CODEX_APP_SERVER_WS_SOCKS_PROXY,r=n===void 0?`socks5h://127.0.0.1:1080`:n;if(!r)return{};try{const n=new URL(e),i=(n.hostname??``).toLowerCase(),a=i===`0.0.0.0`||i===`localhost`||i===`127.0.0.1`||i===`::1`||i.startsWith(`10.`)||i.startsWith(`192.168.`)||/^172\\.(1[6-9]|2\\d|3[0-1])\\./.test(i);return a?{}:{agent:new t(r)}}catch{return{agent:new t(r)}}};function UT(e){';
 export const websocketTransportDeeplinksNewSnippet = 'async connect(){let e=await Wte(this.options.hostConfig);return new wx(new iS(this.options.websocketUrl,{headers:e,...__codexDesktopWsTransportOptions(this.options.websocketUrl,Vte.SocksProxyAgent),perMessageDeflate:!1}))}};function __codexDesktopWsTransportOptions(e,t){const n=process.env.CODEX_APP_SERVER_WS_SOCKS_PROXY,r=n===void 0?"socks5h://127.0.0.1:1080":n;if(!r)return{};try{const n=new URL(e),i=(n.hostname??"").toLowerCase(),a=i==="0.0.0.0"||i==="localhost"||i==="127.0.0.1"||i==="::1"||i.startsWith("10.")||i.startsWith("192.168.")||/^172\\.(1[6-9]|2\\d|3[0-1])\\./.test(i);return a?{}:{agent:new t(r)}}catch{return{agent:new t(r)}}};function Ute(e){';
 
 export const proxyAuthPatchMarker = "e.requiresOpenaiAuth===!1?`apikey`:null";
 export const proxyAuthOldSnippet = "function S(e,t){let n=_(e.account),r=t.useCopilotAuthIfAvailable&&t.isCopilotApiAvailable?`copilot`:n;return{openAIAuth:n,authMethod:r,requiresAuth:r===`copilot`||(e.requiresOpenaiAuth??!0),email:e.account?.type===`chatgpt`?e.account.email:null,planAtLogin:e.account?.type===`chatgpt`?e.account.planType:null}}";
+// 26.320+: different minification variable names (w instead of S, v instead of _)
+export const proxyAuthOldSnippetV2 = "function w(e,t){let n=v(e.account),r=t.useCopilotAuthIfAvailable&&t.isCopilotApiAvailable?`copilot`:n;return{openAIAuth:n,authMethod:r,requiresAuth:r===`copilot`||(e.requiresOpenaiAuth??!0),email:e.account?.type===`chatgpt`?e.account.email:null,planAtLogin:e.account?.type===`chatgpt`?e.account.planType:null}}";
 export const proxyAuthNewSnippet = "function S(e,t){let n=_(e.account),r=t.useCopilotAuthIfAvailable&&t.isCopilotApiAvailable?`copilot`:n!=null?n:e.requiresOpenaiAuth===!1?`apikey`:null;return{openAIAuth:n,authMethod:r,requiresAuth:r===`copilot`||(e.requiresOpenaiAuth??!0),email:e.account?.type===`chatgpt`?e.account.email:null,planAtLogin:e.account?.type===`chatgpt`?e.account.planType:null}}";
+export const proxyAuthNewSnippetV2 = "function w(e,t){let n=v(e.account),r=t.useCopilotAuthIfAvailable&&t.isCopilotApiAvailable?`copilot`:n!=null?n:e.requiresOpenaiAuth===!1?`apikey`:null;return{openAIAuth:n,authMethod:r,requiresAuth:r===`copilot`||(e.requiresOpenaiAuth??!0),email:e.account?.type===`chatgpt`?e.account.email:null,planAtLogin:e.account?.type===`chatgpt`?e.account.planType:null}}";
 
 export function patchLocalWebsocketTransportSource(source) {
   if (source.includes(websocketTransportHelper)) {
@@ -31,6 +37,14 @@ export function patchLocalWebsocketTransportSource(source) {
     };
   }
 
+  // 26.320+: product-name bundle variant
+  if (source.includes(websocketTransportProductNameOldSnippet)) {
+    return {
+      changed: true,
+      code: source.replace(websocketTransportProductNameOldSnippet, websocketTransportProductNameNewSnippet)
+    };
+  }
+
   if (
     !source.includes("127.0.0.1:1080") &&
     !source.includes("socks5h://127.0.0.1:1080") &&
@@ -47,14 +61,23 @@ export function patchProxyAuthUiModeSource(source) {
     return { changed: false, code: source };
   }
 
-  if (!source.includes(proxyAuthOldSnippet)) {
-    throw new Error("proxy auth UI patch anchor not found");
+  // Try original (26.311) pattern
+  if (source.includes(proxyAuthOldSnippet)) {
+    return {
+      changed: true,
+      code: source.replace(proxyAuthOldSnippet, proxyAuthNewSnippet)
+    };
   }
 
-  return {
-    changed: true,
-    code: source.replace(proxyAuthOldSnippet, proxyAuthNewSnippet)
-  };
+  // Try 26.320+ pattern (different minification variable names)
+  if (source.includes(proxyAuthOldSnippetV2)) {
+    return {
+      changed: true,
+      code: source.replace(proxyAuthOldSnippetV2, proxyAuthNewSnippetV2)
+    };
+  }
+
+  throw new Error("proxy auth UI patch anchor not found");
 }
 
 export async function patchExtractedAppBundles(extractedRoot) {
@@ -93,15 +116,15 @@ async function patchFirstMatchingFile(filePaths, patcher) {
 
   for (const filePath of filePaths) {
     const source = await fs.readFile(filePath, "utf8");
-    const hasTransportMarkers =
+    const hasKnownAnchor =
       source.includes(websocketTransportHelper) ||
       source.includes(websocketTransportOldSnippet) ||
       source.includes(websocketTransportDeeplinksOldSnippet) ||
-      source.includes("127.0.0.1:1080") ||
-      source.includes("socks5h://127.0.0.1:1080") ||
-      source.includes("SocksProxyAgent");
+      source.includes(websocketTransportProductNameOldSnippet);
 
-    if (!hasTransportMarkers) {
+    if (!hasKnownAnchor) {
+      // File may contain generic SocksProxyAgent references (e.g. remote control)
+      // but not the app-server transport snippet we need to patch — skip it.
       continue;
     }
 
@@ -113,11 +136,23 @@ async function patchFirstMatchingFile(filePaths, patcher) {
     return { path: filePath, changed: result.changed };
   }
 
+  // Fallback: check if any file has generic SOCKS markers we couldn't match
+  for (const filePath of filePaths) {
+    const source = await fs.readFile(filePath, "utf8");
+    if (
+      source.includes("127.0.0.1:1080") ||
+      source.includes("socks5h://127.0.0.1:1080")
+    ) {
+      sawTransportMarkers = true;
+      break;
+    }
+  }
+
   if (!sawTransportMarkers) {
     return { path: filePaths[0], changed: false };
   }
 
-  throw new Error("websocket transport patch anchor not found");
+  throw new Error("websocket transport patch anchor not found — SOCKS references exist but no known snippet matched");
 }
 
 async function findBuildBundles(extractedRoot) {

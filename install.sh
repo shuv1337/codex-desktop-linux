@@ -509,54 +509,12 @@ PY
     fi
 }
 
-# ---- Patch Open In targets for Linux ----
-patch_open_in_targets_linux() {
-    local extracted_root="$1"
-    local main_bundle
-    main_bundle=$(find "$extracted_root/.vite/build" -maxdepth 1 -type f -name "main-*.js" | head -1)
-
-    if [ -z "${main_bundle:-}" ] || [ ! -f "$main_bundle" ]; then
-        warn "Could not locate main bundle for Open In patch"
-        return
-    fi
-
-    if python3 - "$main_bundle" <<'PY'
-from pathlib import Path
-import sys
-
-p = Path(sys.argv[1])
-s = p.read_text(errors='ignore')
-
-# Beta app (26.311+) already has Linux platform support built-in
-# Check for the platform definition pattern: linux:s?Ci(
-if 'linux:s?Ci(' in s or 'linux:n?Ci(' in s or ',linux:' in s:
-    print('open-in linux support already built-in')
-    raise SystemExit(0)
-
-# For older versions, apply the patch
-start = s.find('let mh=null;const kue=Wp.map')
-if start == -1:
-    raise SystemExit('open-in patch start anchor not found (may not be needed for this version)')
-end = s.find('function Rr(', start)
-if end == -1:
-    raise SystemExit('open-in patch end anchor not found')
-
-if 'const WpLinux=[' in s[start:end + 4000]:
-    print('open-in linux patch already applied')
-    raise SystemExit(0)
-
-new_block = '''let mh=null;const WpLinux=[{id:"vscode",label:"VS Code",icon:"apps/vscode.png",detect:()=>Hp("code"),args:(t,e)=>qa(t,e)},{id:"vscodeInsiders",label:"VS Code Insiders",icon:"apps/vscode-insiders.png",detect:()=>Hp("code-insiders"),args:(t,e)=>qa(t,e)},{id:"cursor",label:"Cursor",icon:"apps/cursor.png",detect:()=>Hp("cursor"),args:(t,e)=>qa(t,e)},{id:"windsurf",label:"Windsurf",icon:"apps/windsurf.png",detect:()=>Hp("windsurf"),args:(t,e)=>qa(t,e)},{id:"zed",label:"Zed",icon:"apps/zed.png",detect:()=>Hp("zed"),args:(t,e)=>O_(t,e)},{id:"fileManager",label:"File Manager",icon:"apps/finder.png",detect:()=>Hp("xdg-open"),args:t=>[$u(t)]}];function WOL(){return gr?Wp:process.platform==="linux"?WpLinux:[]}const kue=WOL().map(({id:t,label:e,icon:n})=>({id:t,label:e,icon:n}));async function LO(){const t=WOL();if(t.length===0)return[];if(mh)return mh;const e=[];for(const n of t)try{n.detect()&&e.push(n.id)}catch(r){kr().error("Failed to detect open target",{safe:{},sensitive:{id:n.id,error:r}})}return mh=e,e}function eb(t){const e=t.get(Ne.OPEN_IN_TARGET_PREFERENCES)??{},n=UO(e.global)??void 0,r=Object.fromEntries(Object.entries(e.perPath??{}).flatMap(([i,s])=>{const o=UO(s);return o?[[i,o]]:[]}));return{global:n,perPath:Object.keys(r).length>0?r:void 0}}function UO(t){const e=WOL();return t==="finder"?"fileManager":typeof t!="string"?null:e.some(n=>n.id===t)?t:null}function FO(t,e,n){const r=eb(t),i=(e&&r.perPath?.[e])??r.global??null;return i&&n.has(i)?i:n.values().next().value??null}function Pue(t,e){const n=eb(t);return!!((e&&n.perPath?.[e])??n.global??null)}function $O(t,e,n){const r=eb(t);r.global=n,e&&(r.perPath=r.perPath??{},r.perPath[e]=n),t.set(Ne.OPEN_IN_TARGET_PREFERENCES,r)}async function Mue(t,e,n){const r=WOL().find(a=>a.id===t);if(!r)throw new Error(`Unknown open target "${t}"`);const i=r.detect();if(!i)throw new Error(`Open target "${t}" is not available`);if(gr){if(!(xue(t)&&await Nue(t,e))){if(t==="xcode"){await Tue(e,n);return}if(t==="zed"){await Uue(i,e,n);return}await Rr(i,r.args(e,n),{env:r.env?.()})}return}if(process.platform==="linux"){await Rr(i,r.args(e,n),{env:r.env?.()});return}throw new Error("Opening external editors is only supported on macOS and Linux")}'''
-
-s = s[:start] + new_block + s[end:]
-p.write_text(s)
-print('open-in linux patch applied')
-PY
-    then
-        info "Open In Linux patch applied"
-    else
-        warn "Open In Linux patch could not be applied (continuing)"
-    fi
-}
+# NOTE: The historical `patch_open_in_targets_linux` shell-based patch has been
+# retired. Its anchors no longer match the 26.415+ bundle shape, and its only
+# early-exit check (",linux:" substring) now trivially matches the bundled
+# `systemDefault` target, silently skipping the fix. Open-in Linux targets are
+# now injected by `scripts/release/bundle-patches.mjs` (invoked below via
+# `patch_app_bundles`).
 
 # ---- Patch extracted JS bundles used by the packaged app ----
 patch_app_bundles() {
@@ -592,10 +550,10 @@ patch_asar() {
     # Fix zoom shortcuts (Ctrl +/-/0) across Linux keyboard layouts.
     patch_zoom_shortcuts "$WORK_DIR/app-extracted"
 
-    # Enable Open In targets on Linux (VS Code, Cursor, Windsurf, etc.).
-    patch_open_in_targets_linux "$WORK_DIR/app-extracted"
-
-    # Patch the packaged bundles for shared app-server auth and local websocket transport.
+    # Patch the packaged bundles for:
+    #   * shared app-server auth (proxy-auth UI mode)
+    #   * local websocket transport
+    #   * Open-in Linux targets (VS Code, Cursor, Windsurf, JetBrains, terminals, file manager)
     patch_app_bundles "$WORK_DIR/app-extracted"
 
     # Build native modules in clean environment and copy back

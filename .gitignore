@@ -8,3 +8,5 @@ codex-app/
 dist/
 .pi/
 main-*.js
+codex-app.bak-*/
+Codex.dmg.prev-*

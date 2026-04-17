@@ -467,16 +467,31 @@ for pattern in anchor_patterns:
 if not anchor_match:
     raise SystemExit('zoom shortcut patch anchor not found')
 
-# Use the matched variable names
+# Use the matched variable names.
+# NOTE: the minified bundle sometimes names the window variable `O`, which
+# collides with identifiers we used to use inside the callback (`O`, `M`, etc.).
+# When that happened, the inner `const O = () => ...` shadowed the outer window
+# reference, so `O.webContents.getZoomLevel()` called it on the arrow function
+# instead of the window, the try/catch swallowed the TypeError, and zoom became
+# a silent no-op. Use long prefixed identifiers here that cannot collide with
+# any reasonable minifier output (`__cdlZ*`, `__cdl*`), and capture the window
+# up-front into a local binding so the inner helpers never need to touch the
+# outer scope.
 v = anchor_match.group(1)
 anchor = anchor_match.group(0)
 
 inject = (
-    f'{v}.webContents.on("before-input-event",(C,L)=>{{const j=process.platform==="darwin"?L.meta:L.control;if(!j||L.alt)return;'
-    f'const N=(L.key??"").toLowerCase(),H=(L.code??"").toLowerCase(),O=()=>{{try{{return {v}.webContents.getZoomLevel()}}catch{{return 0}}}},M=Q=>{{try{{{v}.webContents.setZoomLevel(Q)}}catch{{}}}};'
-    'if(N==="+"||N==="="||N==="add"||H==="numpadadd"){C.preventDefault(),M(O()+1);return}'
-    'if(N==="-"||N==="_"||N==="subtract"||H==="numpadsubtract"){C.preventDefault(),M(O()-1);return}'
-    '(N==="0"||H==="digit0"||H==="numpad0")&&(C.preventDefault(),M(0))}),'
+    f'{v}.webContents.on("before-input-event",(__cdlEv,__cdlIn)=>{{'
+    'const __cdlMod=process.platform==="darwin"?__cdlIn.meta:__cdlIn.control;'
+    'if(!__cdlMod||__cdlIn.alt)return;'
+    'const __cdlKey=(__cdlIn.key??"").toLowerCase();'
+    'const __cdlCode=(__cdlIn.code??"").toLowerCase();'
+    f'const __cdlWc={v}.webContents;'
+    'const __cdlZg=()=>{try{return __cdlWc.getZoomLevel()}catch{return 0}};'
+    'const __cdlZs=__cdlQ=>{try{__cdlWc.setZoomLevel(__cdlQ)}catch{}};'
+    'if(__cdlKey==="+"||__cdlKey==="="||__cdlKey==="add"||__cdlCode==="numpadadd"){__cdlEv.preventDefault();__cdlZs(__cdlZg()+1);return}'
+    'if(__cdlKey==="-"||__cdlKey==="_"||__cdlKey==="subtract"||__cdlCode==="numpadsubtract"){__cdlEv.preventDefault();__cdlZs(__cdlZg()-1);return}'
+    '(__cdlKey==="0"||__cdlCode==="digit0"||__cdlCode==="numpad0")&&(__cdlEv.preventDefault(),__cdlZs(0))}),'
 )
 
 if inject in s:

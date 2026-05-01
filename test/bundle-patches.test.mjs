@@ -7,7 +7,9 @@ import path from "node:path";
 import {
   patchExtractedAppBundles,
   patchLocalWebsocketTransportSource,
+  patchOpenInLinuxTargetsSource,
   patchProxyAuthUiModeSource,
+  openInLinuxMarker,
   websocketTransportDeeplinksOldSnippet,
   websocketTransportHelper,
   websocketTransportOldSnippet,
@@ -17,6 +19,20 @@ import {
 const stagedAuthBundle = path.resolve(
   "stage/beta/26.320.11513-beta.1119.linux.1/codex-app/content/webview/assets/use-auth-C1VbPac5.js"
 );
+
+
+test("patchOpenInLinuxTargetsSource handles dollar-prefixed minified identifiers", () => {
+  const source = "var Zg=Xg(process.platform),Qg=s_(Zg),$g=new Set(Zg.filter(e=>e.kind===`editor`).map(e=>e.id)),e_=null,t_=null;";
+
+  const first = patchOpenInLinuxTargetsSource(source);
+  assert.equal(first.changed, true);
+  assert.ok(first.code.includes(openInLinuxMarker));
+  assert.match(first.code, /\$g\.add\(t\.id\)/);
+
+  const second = patchOpenInLinuxTargetsSource(first.code);
+  assert.equal(second.changed, false);
+  assert.equal(second.code, first.code);
+});
 
 test("patchProxyAuthUiModeSource synthesizes apikey auth for shared proxy mode", async () => {
   const source = await fs.readFile(stagedAuthBundle, "utf8");

@@ -36,8 +36,13 @@ export const websocketTransportDeeplinksNewSnippet = 'async connect(){let e=awai
 // common terminals. The identifiers are captured from the regex so this is
 // resilient to future minification churn.
 export const openInLinuxMarker = "__codexDesktopLinuxOpenInTargets";
-export const openInLinuxRegex =
-  /var (?<jc>\w+)=(?<qc>\w+)\(process\.platform\),(?<yc>\w+)=(?<il>\w+)\((\k<jc>)\),(?<xc>\w+)=new Set\(\k<jc>\.filter\(e=>e\.kind===`editor`\)\.map\(e=>e\.id\)\),(?<zc>\w+)=null,(?<qc2>\w+)=null;/;
+const minifiedIdentifier = String.raw`[$A-Za-z_][$\w]*`;
+export const openInLinuxRegex = new RegExp(
+  String.raw`var (?<jc>${minifiedIdentifier})=(?<qc>${minifiedIdentifier})\(process\.platform\),` +
+    String.raw`(?<yc>${minifiedIdentifier})=(?<il>${minifiedIdentifier})\(\k<jc>\),` +
+    String.raw`(?<xc>${minifiedIdentifier})=new Set\(\k<jc>\.filter\(e=>e\.kind===\`editor\`\)\.map\(e=>e\.id\)\),` +
+    String.raw`(?<zc>${minifiedIdentifier})=null,(?<qc2>${minifiedIdentifier})=null;`
+);
 
 export const proxyAuthPatchMarker = "e.requiresOpenaiAuth===!1?`apikey`:null";
 export const proxyAuthOldSnippet = "function S(e,t){let n=_(e.account),r=t.useCopilotAuthIfAvailable&&t.isCopilotApiAvailable?`copilot`:n;return{openAIAuth:n,authMethod:r,requiresAuth:r===`copilot`||(e.requiresOpenaiAuth??!0),email:e.account?.type===`chatgpt`?e.account.email:null,planAtLogin:e.account?.type===`chatgpt`?e.account.planType:null}}";

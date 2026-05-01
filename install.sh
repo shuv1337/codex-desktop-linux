@@ -8,7 +8,7 @@ set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 INSTALL_DIR="${CODEX_INSTALL_DIR:-$SCRIPT_DIR/codex-app}"
-ELECTRON_VERSION="40.0.0"
+ELECTRON_VERSION="${CODEX_ELECTRON_VERSION:-}"
 APPCAST_SCRIPT="$SCRIPT_DIR/scripts/appcast-metadata.mjs"
 BETA_APPCAST_URL="https://persistent.oaistatic.com/codex-app-beta/appcast.xml"
 PROD_APPCAST_URL="https://persistent.oaistatic.com/codex-app-prod/appcast.xml"
@@ -328,9 +328,16 @@ extract_zip() {
     unzip -q "$zip_path" -d "$WORK_DIR/zip-extract" || \
         error "Failed to extract ZIP"
 
-    local app_dir
-    app_dir=$(find "$WORK_DIR/zip-extract" -maxdepth 2 -name "*.app" -type d | head -1)
-    [ -n "$app_dir" ] || error "Could not find .app bundle in ZIP"
+    local app_dir=""
+    local candidate
+    while IFS= read -r candidate; do
+        if [ -f "$candidate/Contents/Resources/app.asar" ]; then
+            app_dir="$candidate"
+            break
+        fi
+    done < <(find "$WORK_DIR/zip-extract" -maxdepth 3 -name "*.app" -type d ! -path "*/__MACOSX/*" | sort)
+
+    [ -n "$app_dir" ] || error "Could not find a usable .app bundle in ZIP"
 
     info "Found: $(basename "$app_dir")"
     echo "$app_dir"
@@ -391,6 +398,32 @@ extract_app() {
             extract_dmg "$archive_path"
             ;;
     esac
+}
+
+# ---- Detect Electron version from the extracted app ----
+detect_electron_version() {
+    local extracted_root="$1"
+
+    if [ -n "${CODEX_ELECTRON_VERSION:-}" ]; then
+        ELECTRON_VERSION="$CODEX_ELECTRON_VERSION"
+        info "Using Electron v$ELECTRON_VERSION from CODEX_ELECTRON_VERSION"
+        return
+    fi
+
+    local detected
+    detected=$(node - "$extracted_root/package.json" <<'NODE'
+const packageJsonPath = process.argv[2];
+const pkg = require(packageJsonPath);
+const version = pkg.devDependencies?.electron || pkg.dependencies?.electron || "";
+if (!/^\d+\.\d+\.\d+(?:[-+].*)?$/.test(version)) {
+  process.exit(1);
+}
+console.log(version);
+NODE
+    ) || error "Could not detect Electron version from $extracted_root/package.json; set CODEX_ELECTRON_VERSION to override"
+
+    ELECTRON_VERSION="$detected"
+    info "Detected Electron v$ELECTRON_VERSION from app package.json"
 }
 
 # ---- Build native modules in a clean directory ----
@@ -547,6 +580,9 @@ patch_asar() {
     rm -rf "$WORK_DIR/app-extracted/node_modules/sparkle-darwin" 2>/dev/null || true
     find "$WORK_DIR/app-extracted" -name "sparkle.node" -delete 2>/dev/null || true
 
+    # Detect the Electron version before rebuilding native modules or downloading Linux Electron.
+    detect_electron_version "$WORK_DIR/app-extracted"
+
     # Fix zoom shortcuts (Ctrl +/-/0) across Linux keyboard layouts.
     patch_zoom_shortcuts "$WORK_DIR/app-extracted"
 
@@ -581,7 +617,9 @@ download_electron() {
 
     local url="https://github.com/electron/electron/releases/download/v${ELECTRON_VERSION}/electron-v${ELECTRON_VERSION}-linux-${electron_arch}.zip"
 
-    curl -L --progress-bar -o "$WORK_DIR/electron.zip" "$url"
+    curl -fL --retry 3 --retry-all-errors --connect-timeout 30 --max-time 600 \
+        --progress-bar -o "$WORK_DIR/electron.zip" "$url"
+    unzip -tq "$WORK_DIR/electron.zip" >/dev/null
     mkdir -p "$INSTALL_DIR"
     cd "$INSTALL_DIR"
     unzip -qo "$WORK_DIR/electron.zip"
@@ -1294,7 +1332,7 @@ SCRIPT
 main() {
     echo "============================================" >&2
     echo "  Codex Desktop for Linux — Installer"       >&2
-    echo "  (Beta channel with remote connections)"    >&2
+    echo "  (appcast-driven macOS archive conversion)" >&2
     echo "============================================" >&2
     echo ""                                             >&2
 

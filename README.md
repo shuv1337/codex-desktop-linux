@@ -12,31 +12,31 @@ The installer:
 2. Extracts `app.asar` (the Electron app bundle)
 3. Rebuilds native Node.js modules (`node-pty`, `better-sqlite3`) for Linux
 4. Removes macOS-only modules (`sparkle` auto-updater)
-5. Downloads Linux Electron (same version as the app — v40)
+5. Detects the app's bundled Electron version and downloads the matching Linux Electron build
 6. Patches the app bundle for Linux-specific fixes and websocket app-server support
 7. Repacks everything and creates launch scripts
 
 ## Prerequisites
 
-**Node.js 20+**, **npm**, **Python 3**, **7z**, **curl**, and **build tools** (gcc/g++/make).
+**Node.js 20+**, **npm**, **Python 3**, **7z**, **curl**, **unzip**, and **build tools** (gcc/g++/make).
 
 ### Debian/Ubuntu
 
 ```bash
-sudo apt install nodejs npm python3 p7zip-full curl build-essential
+sudo apt install nodejs npm python3 p7zip-full curl unzip build-essential
 ```
 
 ### Fedora
 
 ```bash
-sudo dnf install nodejs npm python3 p7zip curl
+sudo dnf install nodejs npm python3 p7zip curl unzip
 sudo dnf groupinstall 'Development Tools'
 ```
 
 ### Arch
 
 ```bash
-sudo pacman -S nodejs npm python p7zip curl base-devel
+sudo pacman -S nodejs npm python p7zip curl unzip base-devel
 ```
 
 You also need the **Codex CLI**:

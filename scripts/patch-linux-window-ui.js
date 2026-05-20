@@ -49,6 +49,7 @@ const {
 } = require("./patches/launch-actions.js");
 const {
   applyBrowserUseNodeReplApprovalPatch,
+  applyLinuxAppServerWebSocketProxyPatch,
   applyLinuxBrowserUseIabVisibleOnCreatePatch,
   applyLinuxChromeExtensionStatusPatch,
   applyLinuxExplicitIpcQuitPatch,
@@ -133,6 +134,7 @@ module.exports = {
   COMPUTER_USE_UI_SETTINGS_KEY,
   applyBrowserAnnotationScreenshotPatch,
   applyBrowserUseNodeReplApprovalPatch,
+  applyLinuxAppServerWebSocketProxyPatch,
   applyKeybindsSettingsIndexPatch,
   applyKeybindsSettingsSectionsPatch,
   applyKeybindsSettingsSharedPatch,

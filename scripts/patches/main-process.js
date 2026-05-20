@@ -799,7 +799,35 @@ function applyLinuxGitOriginsSourceFallbackPatch(currentSource) {
   return currentSource;
 }
 
+function applyLinuxAppServerWebSocketProxyPatch(currentSource) {
+  if (currentSource.includes("CODEX_APP_SERVER_WS_SOCKS_PROXY")) {
+    return currentSource;
+  }
+
+  const hardcodedProxyRegex =
+    /agent:new ([A-Za-z_$][\w$]*)\.SocksProxyAgent\(`socks5h:\/\/127\.0\.0\.1:1080`\),/;
+  const match = currentSource.match(hardcodedProxyRegex);
+  if (match == null) {
+    if (
+      currentSource.includes("SocksProxyAgent") &&
+      currentSource.includes("socks5h://127.0.0.1:1080")
+    ) {
+      console.warn(
+        "WARN: Could not find app-server websocket SOCKS agent needle — skipping app-server proxy patch",
+      );
+    }
+    return currentSource;
+  }
+
+  const [, socksModule] = match;
+  return currentSource.replace(
+    hardcodedProxyRegex,
+    `...process.env.CODEX_APP_SERVER_WS_SOCKS_PROXY?{agent:new ${socksModule}.SocksProxyAgent(process.env.CODEX_APP_SERVER_WS_SOCKS_PROXY)}:{},`,
+  );
+}
+
 module.exports = {
+  applyLinuxAppServerWebSocketProxyPatch,
   applyBrowserUseNodeReplApprovalPatch,
   applyLinuxBrowserUseIabVisibleOnCreatePatch,
   applyLinuxChromeExtensionStatusPatch,

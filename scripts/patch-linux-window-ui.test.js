@@ -17,6 +17,7 @@ const {
   applyLinuxComputerUseRendererAvailabilityPatch,
   applyLinuxAvatarOverlayMousePassthroughPatch,
   applyBrowserUseNodeReplApprovalPatch,
+  applyLinuxAppServerWebSocketProxyPatch,
   applyLinuxBrowserUseIabVisibleOnCreatePatch,
   applyLinuxChromeExtensionStatusPatch,
   applyLinuxChromePluginAutoInstallPatch,
@@ -255,6 +256,7 @@ test("default core patch descriptors are grouped and unique", () => {
     "linux-launch-actions",
     "linux-hotkey-window-prewarm",
     "linux-git-origins-source-fallback",
+    "linux-app-server-websocket-proxy",
     "linux-app-sunset-gate",
     "opaque-window-default-general-settings",
     "opaque-window-default-webview-index",
@@ -1791,6 +1793,22 @@ test("adds a fallback source for renderer git-origins requests without weakening
     /if\(r===`git-origins`\)return t\.Gt\(\{source:`linux_git_origins_missing_source_fallback`,requestKind:r\},l\)/,
   );
   assert.match(patched, /throw Error\(`Missing git operation source for \$\{r\}`\)/);
+});
+
+test("app-server websocket proxy patch makes the localhost SOCKS agent opt-in", () => {
+  const source =
+    "class X{async connect(){let e=await th(this.options.hostConfig),t=new Ap(this.options.websocketUrl,{headers:e,agent:new Qm.SocksProxyAgent(`socks5h://127.0.0.1:1080`),perMessageDeflate:!1});return t}}";
+
+  const patched = applyPatchTwice(applyLinuxAppServerWebSocketProxyPatch, source);
+
+  assert.match(
+    patched,
+    /\.\.\.process\.env\.CODEX_APP_SERVER_WS_SOCKS_PROXY\?\{agent:new Qm\.SocksProxyAgent\(process\.env\.CODEX_APP_SERVER_WS_SOCKS_PROXY\)\}:\{\},/,
+  );
+  assert.doesNotMatch(
+    patched,
+    /agent:new Qm\.SocksProxyAgent\(`socks5h:\/\/127\.0\.0\.1:1080`\),/,
+  );
 });
 
 test("missing icon asset skips only icon patches", () => {

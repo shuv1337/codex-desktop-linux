@@ -865,6 +865,173 @@ find_codex_cli() {
     return 1
 }
 
+find_alleycat_cli() {
+    if [ -n "${ALLEYCAT_CLI_PATH:-}" ] && [ -x "$ALLEYCAT_CLI_PATH" ]; then
+        echo "$ALLEYCAT_CLI_PATH"
+        return 0
+    fi
+
+    local candidate
+    for candidate in \
+        "$HOME/.cargo/bin/alleycat" \
+        "$HOME/.local/bin/alleycat" \
+        "/usr/local/bin/alleycat" \
+        "/usr/bin/alleycat"
+    do
+        if [ -x "$candidate" ]; then
+            echo "$candidate"
+            return 0
+        fi
+    done
+
+    if command -v alleycat >/dev/null 2>&1; then
+        command -v alleycat
+        return 0
+    fi
+
+    return 1
+}
+
+trim_toml_value() {
+    sed -e 's/^[[:space:]]*//' \
+        -e 's/[[:space:]]*$//' \
+        -e 's/^"//' \
+        -e 's/"$//'
+}
+
+resolve_alleycat_codex_ws_url() {
+    if [ -n "${CODEX_DESKTOP_ALLEYCAT_WS_URL:-}" ]; then
+        echo "$CODEX_DESKTOP_ALLEYCAT_WS_URL"
+        return 0
+    fi
+
+    local config="${XDG_CONFIG_HOME:-$HOME/.config}/alleycat/host.toml"
+    local host="127.0.0.1"
+    local port="8390"
+    local section=""
+    local line key value
+
+    if [ -f "$config" ]; then
+        while IFS= read -r line; do
+            line="${line%%#*}"
+            case "$line" in
+                \[*\])
+                    section="$(printf '%s' "$line" | trim_toml_value)"
+                    ;;
+                *=*)
+                    if [ "$section" = "[agents.codex]" ]; then
+                        key="$(printf '%s' "${line%%=*}" | trim_toml_value)"
+                        value="$(printf '%s' "${line#*=}" | trim_toml_value)"
+                        case "$key" in
+                            host)
+                                [ -n "$value" ] && host="$value"
+                                ;;
+                            port)
+                                case "$value" in
+                                    ""|*[!0-9]*) ;;
+                                    *) port="$value" ;;
+                                esac
+                                ;;
+                        esac
+                    fi
+                    ;;
+            esac
+        done < "$config"
+    fi
+
+    printf 'ws://%s:%s\n' "$host" "$port"
+}
+
+parse_ws_endpoint() {
+    local url="$1"
+    local remainder="$url"
+    case "$remainder" in
+        ws://*) remainder="${remainder#ws://}" ;;
+        wss://*) remainder="${remainder#wss://}" ;;
+        *) return 1 ;;
+    esac
+    local host="${remainder%%:*}"
+    local port="${remainder##*:}"
+    case "$host:$port" in
+        :*|*:|*:*[!0-9]*) return 1 ;;
+    esac
+    printf '%s\n%s\n' "$host" "$port"
+}
+
+tcp_listener_ready() {
+    local host="$1"
+    local port="$2"
+    ( : >"/dev/tcp/$host/$port" ) >/dev/null 2>&1
+}
+
+wait_for_tcp_listener() {
+    local host="$1"
+    local port="$2"
+    local attempts="${3:-50}"
+    local i
+    for i in $(seq 1 "$attempts"); do
+        if tcp_listener_ready "$host" "$port"; then
+            return 0
+        fi
+        sleep 0.1
+    done
+    return 1
+}
+
+configure_alleycat_app_server_transport() {
+    if [ "${CODEX_DESKTOP_USE_ALLEYCAT:-1}" = "0" ]; then
+        return 0
+    fi
+    if [ -n "${CODEX_APP_SERVER_WS_URL:-}" ]; then
+        return 0
+    fi
+
+    local alleycat_path
+    alleycat_path="$(find_alleycat_cli || true)"
+    if [ -z "$alleycat_path" ]; then
+        return 0
+    fi
+
+    if ! "$alleycat_path" status --json >/dev/null 2>&1; then
+        if command -v systemctl >/dev/null 2>&1; then
+            systemctl --user start alleycat.service >/dev/null 2>&1 || true
+        fi
+    fi
+
+    local ready=0
+    for _ in $(seq 1 30); do
+        if "$alleycat_path" status --json >/dev/null 2>&1; then
+            ready=1
+            break
+        fi
+        sleep 0.1
+    done
+    if [ "$ready" -ne 1 ]; then
+        echo "Warning: Alleycat is not running; Codex Desktop will use its built-in app-server startup path" >&2
+        return 0
+    fi
+
+    local endpoint
+    endpoint="$(resolve_alleycat_codex_ws_url)"
+    local ws_parts
+    mapfile -t ws_parts < <(parse_ws_endpoint "$endpoint")
+    local host="${ws_parts[0]:-}"
+    local port="${ws_parts[1]:-}"
+    if [ -z "$host" ] || [ -z "$port" ]; then
+        echo "Warning: could not parse Alleycat Codex websocket URL: $endpoint" >&2
+        return 0
+    fi
+
+    if ! wait_for_tcp_listener "$host" "$port" 50; then
+        echo "Warning: Alleycat Codex websocket bridge is not listening at $endpoint" >&2
+        return 0
+    fi
+
+    export CODEX_APP_SERVER_WS_URL="$endpoint"
+    export CODEX_APP_SERVER_WS_SOCKS_PROXY="${CODEX_APP_SERVER_WS_SOCKS_PROXY:-}"
+    echo "Using Alleycat Codex app-server bridge=$CODEX_APP_SERVER_WS_URL"
+}
+
 notify_error() {
     local message="$1"
     local icon
@@ -1734,6 +1901,8 @@ if needs_cold_start; then
         run_cli_preflight_background
         log_phase "cli_preflight_backgrounded"
     fi
+    configure_alleycat_app_server_transport
+    log_phase "app_server_transport_configured"
 fi
 
 export_packaged_runtime_env

@@ -15,6 +15,7 @@ resolve_script_dir() {
 }
 
 SCRIPT_DIR="$(resolve_script_dir)"
+LAUNCH_CWD="$(pwd -P 2>/dev/null || pwd)"
 WEBVIEW_DIR="$SCRIPT_DIR/content/webview"
 LOG_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/$CODEX_LINUX_APP_ID"
 LOG_FILE="$LOG_DIR/launcher.log"
@@ -939,6 +940,20 @@ resolve_alleycat_codex_ws_url() {
         done < "$config"
     fi
 
+    local agent="${CODEX_DESKTOP_ALLEYCAT_AGENT:-codex}"
+    case "$agent" in
+        ""|codex)
+            ;;
+        *[!A-Za-z0-9_-]*)
+            echo "Warning: ignoring invalid CODEX_DESKTOP_ALLEYCAT_AGENT=$agent" >&2
+            agent="codex"
+            ;;
+    esac
+    if [ "$agent" != "codex" ]; then
+        printf 'ws://%s:%s/agent/%s\n' "$host" "$((port + 1))" "$agent"
+        return 0
+    fi
+
     printf 'ws://%s:%s\n' "$host" "$port"
 }
 
@@ -950,6 +965,8 @@ parse_ws_endpoint() {
         wss://*) remainder="${remainder#wss://}" ;;
         *) return 1 ;;
     esac
+    remainder="${remainder%%/*}"
+    remainder="${remainder%%\?*}"
     local host="${remainder%%:*}"
     local port="${remainder##*:}"
     case "$host:$port" in
@@ -978,22 +995,38 @@ wait_for_tcp_listener() {
     return 1
 }
 
+# Hard-fail policy:
+#   Codex Desktop must NEVER spawn its own bundled codex app-server
+#   process. The local codex app-server is owned exclusively by
+#   `alleycat.service` (see ~/repos/alleycat/AGENTS.md "Codex
+#   app-server lifecycle"). If alleycat is not installed, not running,
+#   or not exposing a reachable websocket bridge for Codex, abort the
+#   launch with a clear error so the user knows to fix alleycat
+#   instead of silently falling through to upstream's daemon spawn.
+#
+#   Escape hatch: `CODEX_DESKTOP_USE_ALLEYCAT=0` opts out entirely
+#   (Codex Desktop reverts to its built-in app-server startup path).
+#   Only set this for one-off debugging.
 configure_alleycat_app_server_transport() {
     if [ "${CODEX_DESKTOP_USE_ALLEYCAT:-1}" = "0" ]; then
+        echo "CODEX_DESKTOP_USE_ALLEYCAT=0 — skipping alleycat enforcement; Codex Desktop will use its built-in app-server" >&2
         return 0
     fi
     if [ -n "${CODEX_APP_SERVER_WS_URL:-}" ]; then
+        echo "Using preset CODEX_APP_SERVER_WS_URL=$CODEX_APP_SERVER_WS_URL"
         return 0
     fi
 
     local alleycat_path
     alleycat_path="$(find_alleycat_cli || true)"
     if [ -z "$alleycat_path" ]; then
-        return 0
+        notify_error "Codex Desktop requires Alleycat but the \`alleycat\` binary was not found on PATH (looked in ~/.cargo/bin, ~/.local/bin, /usr/local/bin, /usr/bin). Install alleycat from ~/repos/alleycat (\`cargo install --locked --path crates/alleycat\`) or set CODEX_DESKTOP_USE_ALLEYCAT=0 to bypass (NOT recommended — will leak an orphan codex app-server daemon)."
+        exit 1
     fi
 
     if ! "$alleycat_path" status --json >/dev/null 2>&1; then
         if command -v systemctl >/dev/null 2>&1; then
+            echo "Alleycat is not responding; attempting \`systemctl --user start alleycat.service\`" >&2
             systemctl --user start alleycat.service >/dev/null 2>&1 || true
         fi
     fi
@@ -1007,8 +1040,8 @@ configure_alleycat_app_server_transport() {
         sleep 0.1
     done
     if [ "$ready" -ne 1 ]; then
-        echo "Warning: Alleycat is not running; Codex Desktop will use its built-in app-server startup path" >&2
-        return 0
+        notify_error "Codex Desktop requires Alleycat but it did not become reachable within 3s. Check \`systemctl --user status alleycat.service\` and \`alleycat status --json\`. Set CODEX_DESKTOP_USE_ALLEYCAT=0 to bypass (NOT recommended — will leak an orphan codex app-server daemon)."
+        exit 1
     fi
 
     local endpoint
@@ -1018,13 +1051,13 @@ configure_alleycat_app_server_transport() {
     local host="${ws_parts[0]:-}"
     local port="${ws_parts[1]:-}"
     if [ -z "$host" ] || [ -z "$port" ]; then
-        echo "Warning: could not parse Alleycat Codex websocket URL: $endpoint" >&2
-        return 0
+        notify_error "Codex Desktop could not parse the Alleycat Codex websocket URL: $endpoint. Inspect ~/.config/alleycat/host.toml [agents.codex]."
+        exit 1
     fi
 
     if ! wait_for_tcp_listener "$host" "$port" 50; then
-        echo "Warning: Alleycat Codex websocket bridge is not listening at $endpoint" >&2
-        return 0
+        notify_error "Codex Desktop requires Alleycat's Codex websocket bridge at $endpoint but no listener is accepting. Confirm \`[agents.codex] enabled = true\` in ~/.config/alleycat/host.toml and inspect alleycat logs at ~/.local/state/alleycat/logs/daemon.log.*."
+        exit 1
     fi
 
     export CODEX_APP_SERVER_WS_URL="$endpoint"
@@ -1470,8 +1503,10 @@ ensure_webview_server() {
 
     stop_owned_webview_server
 
-    cd "$WEBVIEW_DIR"
-    python3 "$SCRIPT_DIR/.codex-linux/webview-server.py" "$CODEX_LINUX_WEBVIEW_PORT" --bind 127.0.0.1 &
+    (
+        cd "$WEBVIEW_DIR"
+        python3 "$SCRIPT_DIR/.codex-linux/webview-server.py" "$CODEX_LINUX_WEBVIEW_PORT" --bind 127.0.0.1
+    ) &
     STARTED_WEBVIEW_PID=$!
     echo "$STARTED_WEBVIEW_PID" > "$WEBVIEW_PID_FILE"
 
@@ -1808,7 +1843,10 @@ cleanup_launcher() {
 }
 
 launch_electron() {
-    cd "$SCRIPT_DIR"
+    if ! cd "$LAUNCH_CWD"; then
+        echo "Warning: launch cwd is unavailable, falling back to app dir: $LAUNCH_CWD" >&2
+        cd "$SCRIPT_DIR"
+    fi
     log_phase "electron_launch"
 
     set_electron_defaults "$@"
@@ -1919,5 +1957,6 @@ resolve_browser_use_runtime_env
 
 echo "Using CODEX_CLI_PATH=${CODEX_CLI_PATH:-warm-start-skip}"
 echo "Using managed Node.js runtime=${CODEX_MANAGED_NODE_RUNTIME_DIR:-$SCRIPT_DIR/resources/node-runtime}"
+echo "Using launch cwd=$LAUNCH_CWD"
 
 launch_electron "$@"

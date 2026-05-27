@@ -81,6 +81,11 @@ Environment:
                               Auto-detect WSLg, keep generic Linux defaults, or force the WSLg profile
   CODEX_ELECTRON_DISABLE_GPU_COMPOSITING=0|1
                               Override the launcher's default --disable-gpu-compositing decision
+  CODEX_LINUX_INTEGRATED_TERMINAL_SHELL=/path/to/shell
+                              Override the shell used by the in-app integrated terminal
+                              (falls back to the "codex-linux-integrated-terminal-shell"
+                              string in $XDG_CONFIG_HOME/$CODEX_LINUX_APP_ID/settings.json,
+                              then to the user's $SHELL / login shell)
 
 Logs: ${XDG_CACHE_HOME:-$HOME/.cache}/$CODEX_LINUX_APP_ID/launcher.log
 HELP
@@ -314,6 +319,63 @@ except (OSError, json.JSONDecodeError):
 
 raise SystemExit(0 if enabled else 1)
 PY
+}
+
+linux_setting_str() {
+    local key="$1"
+
+    python3 - "$APP_SETTINGS_FILE" "$key" <<'PY'
+import json
+import sys
+
+settings_path, key = sys.argv[1:3]
+
+try:
+    with open(settings_path, "r", encoding="utf-8") as handle:
+        data = json.load(handle)
+except FileNotFoundError:
+    raise SystemExit(0)
+except (OSError, json.JSONDecodeError):
+    raise SystemExit(0)
+
+if isinstance(data, dict):
+    value = data.get(key)
+    if isinstance(value, str):
+        text = value.strip()
+        if text:
+            sys.stdout.write(text)
+PY
+}
+
+configure_integrated_terminal_shell() {
+    # The embedded terminal in Codex Desktop (node-pty) picks its shell from
+    # process.env.SHELL on Linux (falling back to getent passwd, then
+    # /bin/bash). There is no built-in UI to override this on Linux, so we
+    # honour two override sources here, in priority order:
+    #   1. CODEX_LINUX_INTEGRATED_TERMINAL_SHELL env var (per-launch)
+    #   2. codex-linux-integrated-terminal-shell key in $APP_SETTINGS_FILE
+    # The chosen value must point to an executable; otherwise we log and skip
+    # so the upstream default behaviour still applies.
+    local override="${CODEX_LINUX_INTEGRATED_TERMINAL_SHELL:-}"
+    local source="env"
+
+    if [ -z "$override" ]; then
+        override="$(linux_setting_str codex-linux-integrated-terminal-shell)"
+        source="settings"
+    fi
+
+    if [ -z "$override" ]; then
+        return 0
+    fi
+
+    if [ ! -x "$override" ]; then
+        echo "Ignoring integrated terminal shell override ($source=$override): not an executable file" >&2
+        return 0
+    fi
+
+    export CODEX_LINUX_INTEGRATED_TERMINAL_SHELL="$override"
+    export SHELL="$override"
+    echo "Integrated terminal shell override applied: SHELL=$SHELL (source=$source)"
 }
 
 load_packaged_runtime_helper() {
@@ -1944,6 +2006,7 @@ if needs_cold_start; then
 fi
 
 export_packaged_runtime_env
+configure_integrated_terminal_shell
 if needs_cold_start; then
     clear_bundled_marketplace_tmp_cache
     # The runtime marketplace is populated asynchronously and can briefly

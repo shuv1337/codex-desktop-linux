@@ -6,6 +6,7 @@ const {
   applyLinuxSetIconPatch,
   applyLinuxOpaqueBackgroundPatch,
   applyLinuxFileManagerPatch,
+  applyLinuxIntegratedTerminalShellPatch,
   applyLinuxTrayPatch,
   applyLinuxSingleInstancePatch,
   applyLinuxGitOriginsSourceFallbackPatch,
@@ -54,6 +55,13 @@ module.exports = [
     order: 100,
     ciPolicy: "required-upstream",
     apply: applyLinuxFileManagerPatch,
+  },
+  {
+    id: "linux-integrated-terminal-shell",
+    phase: "main-bundle",
+    order: 105,
+    ciPolicy: "optional",
+    apply: applyLinuxIntegratedTerminalShellPatch,
   },
   {
     id: "linux-tray",

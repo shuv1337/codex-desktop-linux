@@ -2390,6 +2390,10 @@ test_launcher_template_sanity() {
     assert_contains "$REPO_DIR/scripts/lib/native-modules.sh" 'find "$module_dir" -type f -name'
     assert_contains "$REPO_DIR/scripts/lib/native-modules.sh" "CODEX_ELECTRON_CACHE_DIR"
     assert_contains "$REPO_DIR/scripts/lib/native-modules.sh" "--continue-at -"
+    assert_contains "$REPO_DIR/scripts/lib/native-modules.sh" 'prepare_packaged_electron_executable'
+    assert_contains "$REPO_DIR/scripts/lib/native-modules.sh" '"$INSTALL_DIR/${CODEX_APP_ID}-electron"'
+    assert_contains "$REPO_DIR/launcher/start.sh.template" 'ELECTRON_EXECUTABLE="$SCRIPT_DIR/$CODEX_LINUX_APP_ID-electron"'
+    assert_contains "$REPO_DIR/launcher/start.sh.template" 'ensure_packaged_electron_executable'
     assert_file_exists "$REPO_DIR/launcher/webview-server.py"
     assert_contains "$REPO_DIR/launcher/webview-server.py" "Cache-Control"
     assert_contains "$REPO_DIR/launcher/webview-server.py" "If-Modified-Since"
@@ -2499,13 +2503,17 @@ if not re.search(r'if ! linux_setting_enabled "codex-linux-warm-start-enabled" 1
     raise SystemExit("detect_warm_start must not fail when warm start is disabled")
 if "preserving liveness marker for second-instance handoff" not in detect_body:
     raise SystemExit("detect_warm_start must preserve the live app liveness marker")
+if 'Electron reports app.isPackaged=false when the executable basename is' not in source:
+    raise SystemExit("launcher must document why it uses an app-specific Electron executable")
+if 'ensure_packaged_electron_executable\ndetect_warm_start' not in source:
+    raise SystemExit("launcher must prepare the packaged Electron executable before running-app detection")
 if launch_body.count("unset ELECTRON_RUN_AS_NODE") != 2:
     raise SystemExit("launch_electron must clear ELECTRON_RUN_AS_NODE before both Electron launch paths")
-if 'pid_matches_executable "$RUNNING_APP_PID" "$SCRIPT_DIR/electron"' not in launch_body:
+if 'pid_matches_app_executable "$RUNNING_APP_PID"' not in launch_body:
     raise SystemExit("launch_electron must not overwrite APP_PID_FILE for second-instance handoff")
 if 'echo "$ELECTRON_PID" > "$APP_PID_FILE"' not in launch_body:
     raise SystemExit("launch_electron must still write APP_PID_FILE for normal cold launches")
-electron_launch = '"$SCRIPT_DIR/electron" "${ELECTRON_LAUNCH_ARGS[@]}" "${ELECTRON_ARGS[@]}"'
+electron_launch = '"$ELECTRON_EXECUTABLE" "${ELECTRON_LAUNCH_ARGS[@]}" "${ELECTRON_ARGS[@]}"'
 warm_log = 'echo "Electron warm-start handoff:'
 normal_log = 'echo "Electron launch mode:'
 warm_log_pos = launch_body.index(warm_log)
@@ -2524,8 +2532,8 @@ if "clear_bundled_marketplace_tmp_cache\nmonitor_bundled_marketplace_tmp_permiss
     raise SystemExit("warm-start path must not clear bundled marketplace temp cache")
 if not re.search(r'if needs_cold_start; then\s+clear_bundled_marketplace_tmp_cache\s+# The runtime marketplace is populated asynchronously.*?monitor_bundled_marketplace_tmp_permissions\s+sync_browser_use_bundled_plugin_cache\s+sync_chrome_bundled_plugin_cache\s+sync_computer_use_bundled_plugin_cache\s+sync_read_aloud_bundled_plugin_cache\s+run_cold_start_hooks\s+fi', runtime_body, re.S):
     raise SystemExit("bundled marketplace cleanup, plugin sync, and cold-start hooks must run only on cold start")
-if 'if needs_cold_start && [ -z "${CODEX_CLI_PATH:-}" ]; then' not in runtime_body:
-    raise SystemExit("second-instance handoff must skip CLI lookup")
+if 'if [ -z "${CODEX_CLI_PATH:-}" ]; then' not in runtime_body:
+    raise SystemExit("every Electron-launching path must resolve CODEX_CLI_PATH for OAuth/browser handoffs")
 if 'if needs_cold_start && [ -z "$CODEX_CLI_PATH" ]; then' not in runtime_body:
     raise SystemExit("second-instance handoff must skip missing-CLI failure")
 if '"$HOME/.bun/bin/codex"' not in source:

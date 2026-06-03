@@ -42,17 +42,34 @@ pid_matches_install_target() {
     ! pid_is_electron_helper "$pid"
 }
 
+install_target_executable_paths() {
+    printf '%s\n' \
+        "$INSTALL_DIR/${CODEX_APP_ID}-electron" \
+        "$INSTALL_DIR/electron"
+}
+
+pid_matches_any_install_target() {
+    local pid="$1"
+    local electron_path
+
+    while IFS= read -r electron_path; do
+        [ -e "$electron_path" ] || continue
+        if pid_matches_install_target "$pid" "$electron_path"; then
+            return 0
+        fi
+    done < <(install_target_executable_paths)
+
+    return 1
+}
+
 find_running_install_target_pid() {
-    local electron_path="$INSTALL_DIR/electron"
     local app_pid_file="${XDG_STATE_HOME:-$HOME/.local/state}/$CODEX_APP_ID/app.pid"
     local pid
     local proc_exe
 
-    [ -e "$electron_path" ] || return 1
-
     if [ -f "$app_pid_file" ]; then
         pid="$(cat "$app_pid_file" 2>/dev/null || true)"
-        if pid_matches_install_target "$pid" "$electron_path"; then
+        if pid_matches_any_install_target "$pid"; then
             echo "$pid"
             return 0
         fi
@@ -62,7 +79,7 @@ find_running_install_target_pid() {
         [ -e "$proc_exe" ] || continue
         pid="${proc_exe#/proc/}"
         pid="${pid%/exe}"
-        if pid_matches_install_target "$pid" "$electron_path"; then
+        if pid_matches_any_install_target "$pid"; then
             echo "$pid"
             return 0
         fi

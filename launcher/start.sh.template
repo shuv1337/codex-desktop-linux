@@ -15,6 +15,8 @@ resolve_script_dir() {
 }
 
 SCRIPT_DIR="$(resolve_script_dir)"
+LEGACY_ELECTRON_EXECUTABLE="$SCRIPT_DIR/electron"
+ELECTRON_EXECUTABLE="$SCRIPT_DIR/$CODEX_LINUX_APP_ID-electron"
 if [ -z "${CODEX_HOME:-}" ]; then
     if [ -n "${HOME:-}" ]; then
         CODEX_HOME="$HOME/.codex"
@@ -1373,6 +1375,43 @@ find_codex_cli() {
     return 1
 }
 
+# Durable, env-independent fallback for the packaged app's Codex CLI resolver.
+#
+# The app-server transport (src bundle) resolves `codex` from, in order:
+#   1. process.env.CODEX_CLI_PATH
+#   2. PATH lookup
+#   3. <resources>/app.asar.unpacked/codex
+#   4. <resources>/codex-linux            (file, or dir containing `codex`)
+#   5. <devRuntime>/extension/bin/codex
+# GUI/browser-launched handoffs (e.g. an OAuth `codex://` redirect that lands in
+# a fresh second-instance Electron) can reach the transport with neither
+# CODEX_CLI_PATH nor the user's interactive PATH, so without a resources-side
+# fallback the connect throws "Unable to locate the Codex CLI binary" and breaks
+# plugin OAuth. We mirror the resolved CLI into <resources>/codex-linux/codex so
+# candidate #4 always succeeds. Done in the launcher (not the install pipeline)
+# so it self-heals on every launch and never bakes a build-machine-specific path
+# into native packages. Best-effort: failures never block launch.
+stage_resources_codex_cli_fallback() {
+    local cli_path="${CODEX_CLI_PATH:-}"
+    [ -n "$cli_path" ] || return 0
+    [ -x "$cli_path" ] || return 0
+
+    local resources_dir="$SCRIPT_DIR/resources"
+    [ -d "$resources_dir" ] || return 0
+
+    local fallback_dir="$resources_dir/codex-linux"
+    local fallback_link="$fallback_dir/codex"
+
+    # Already pointing at the resolved CLI? Nothing to do.
+    if [ -L "$fallback_link" ] && [ "$(readlink "$fallback_link" 2>/dev/null)" = "$cli_path" ]; then
+        return 0
+    fi
+
+    mkdir -p "$fallback_dir" 2>/dev/null || return 0
+    ln -sfn "$cli_path" "$fallback_link" 2>/dev/null || return 0
+    echo "Staged resources Codex CLI fallback: $fallback_link -> $cli_path"
+}
+
 notify_error() {
     local message="$1"
     local icon
@@ -1390,6 +1429,44 @@ notify_error() {
 
 canonical_path() {
     readlink -f "$1" 2>/dev/null || echo "$1"
+}
+
+ensure_packaged_electron_executable() {
+    # Electron reports app.isPackaged=false when the executable basename is
+    # exactly "electron"/"electron.exe". The upstream bootstrap disables
+    # single-instance handoff for unpackaged apps, so running the downloaded
+    # runtime as ./electron makes codex:// OAuth redirects open duplicate
+    # windows. Prefer an app-specific hardlink/copy whose basename is not
+    # "electron"; install.sh creates it for packaged/read-only installs, and
+    # this runtime fallback self-heals user-local trees that predate the fix.
+    if [ -x "$ELECTRON_EXECUTABLE" ]; then
+        return 0
+    fi
+
+    if [ ! -x "$LEGACY_ELECTRON_EXECUTABLE" ]; then
+        notify_error "Electron runtime not found at $LEGACY_ELECTRON_EXECUTABLE"
+        exit 1
+    fi
+
+    if ln "$LEGACY_ELECTRON_EXECUTABLE" "$ELECTRON_EXECUTABLE" 2>/dev/null \
+        || cp -p "$LEGACY_ELECTRON_EXECUTABLE" "$ELECTRON_EXECUTABLE" 2>/dev/null; then
+        chmod +x "$ELECTRON_EXECUTABLE" 2>/dev/null || true
+        echo "Prepared packaged Electron executable: $ELECTRON_EXECUTABLE"
+        return 0
+    fi
+
+    echo "WARNING: Could not prepare $ELECTRON_EXECUTABLE; falling back to $LEGACY_ELECTRON_EXECUTABLE (single-instance handoff may be disabled)"
+    ELECTRON_EXECUTABLE="$LEGACY_ELECTRON_EXECUTABLE"
+}
+
+pid_matches_app_executable() {
+    local pid="$1"
+
+    pid_matches_executable "$pid" "$ELECTRON_EXECUTABLE" && return 0
+    # Backward compatibility for a running app launched before this fix, or for
+    # read-only old installs where the runtime fallback above cannot create the
+    # app-specific executable yet.
+    pid_matches_executable "$pid" "$LEGACY_ELECTRON_EXECUTABLE"
 }
 
 resolve_update_manager_path() {
@@ -1469,7 +1546,7 @@ find_running_app_pid() {
 
     if [ -f "$APP_PID_FILE" ]; then
         pid="$(cat "$APP_PID_FILE" 2>/dev/null || true)"
-        if pid_matches_executable "$pid" "$SCRIPT_DIR/electron"; then
+        if pid_matches_app_executable "$pid"; then
             echo "$pid"
             return 0
         fi
@@ -1486,7 +1563,7 @@ discover_running_app_pid() {
         [ -e "$proc_exe" ] || continue
         pid="${proc_exe#/proc/}"
         pid="${pid%/exe}"
-        if pid_matches_executable "$pid" "$SCRIPT_DIR/electron"; then
+        if pid_matches_app_executable "$pid"; then
             echo "$pid"
             return 0
         fi
@@ -1496,7 +1573,7 @@ discover_running_app_pid() {
 }
 
 running_app_is_active() {
-    [ -n "${RUNNING_APP_PID:-}" ] && pid_matches_executable "$RUNNING_APP_PID" "$SCRIPT_DIR/electron"
+    [ -n "${RUNNING_APP_PID:-}" ] && pid_matches_app_executable "$RUNNING_APP_PID"
 }
 
 using_second_instance_handoff() {
@@ -1916,7 +1993,7 @@ clear_stale_pid_file() {
 
     local pid=""
     pid="$(cat "$APP_PID_FILE" 2>/dev/null || true)"
-    if [ -z "$pid" ] || ! pid_matches_executable "$pid" "$SCRIPT_DIR/electron"; then
+    if [ -z "$pid" ] || ! pid_matches_app_executable "$pid"; then
         rm -f "$APP_PID_FILE"
     fi
 }
@@ -2310,15 +2387,15 @@ launch_electron() {
     if [ "$WARM_START" -eq 1 ]; then
         echo "Electron warm-start handoff: pid=$RUNNING_APP_PID rendering_mode=$ELECTRON_RENDERING_MODE wslg_detected=$ELECTRON_WSLG_DETECTED ozone_platform=${ELECTRON_OZONE_PLATFORM:-default} ozone_hint=${ELECTRON_OZONE_HINT:-none} gpu_enabled=$ELECTRON_GPU_ENABLED gpu_disable_arg=$ELECTRON_GPU_DISABLE_SWITCH_IN_ARGS gpu_compositing_disabled=$ELECTRON_GPU_COMPOSITING_DISABLED gl_switch_added=$ELECTRON_GL_SWITCH_ADDED renderer_accessibility_forced=$ELECTRON_RENDERER_ACCESSIBILITY_FORCED"
         unset ELECTRON_RUN_AS_NODE
-        "$SCRIPT_DIR/electron" "${ELECTRON_LAUNCH_ARGS[@]}" "${ELECTRON_ARGS[@]}"
+        "$ELECTRON_EXECUTABLE" "${ELECTRON_LAUNCH_ARGS[@]}" "${ELECTRON_ARGS[@]}"
         return $?
     fi
 
     echo "Electron launch mode: rendering_mode=$ELECTRON_RENDERING_MODE wslg_detected=$ELECTRON_WSLG_DETECTED ozone_platform=${ELECTRON_OZONE_PLATFORM:-default} ozone_hint=${ELECTRON_OZONE_HINT:-none} gpu_enabled=$ELECTRON_GPU_ENABLED gpu_disable_arg=$ELECTRON_GPU_DISABLE_SWITCH_IN_ARGS gpu_compositing_disabled=$ELECTRON_GPU_COMPOSITING_DISABLED gl_switch_added=$ELECTRON_GL_SWITCH_ADDED renderer_accessibility_forced=$ELECTRON_RENDERER_ACCESSIBILITY_FORCED"
     unset ELECTRON_RUN_AS_NODE
-    "$SCRIPT_DIR/electron" "${ELECTRON_LAUNCH_ARGS[@]}" "${ELECTRON_ARGS[@]}" &
+    "$ELECTRON_EXECUTABLE" "${ELECTRON_LAUNCH_ARGS[@]}" "${ELECTRON_ARGS[@]}" &
     ELECTRON_PID=$!
-    if [ -n "${RUNNING_APP_PID:-}" ] && pid_matches_executable "$RUNNING_APP_PID" "$SCRIPT_DIR/electron"; then
+    if [ -n "${RUNNING_APP_PID:-}" ] && pid_matches_app_executable "$RUNNING_APP_PID"; then
         echo "Preserving Codex Desktop pid=$RUNNING_APP_PID liveness marker for second-instance handoff"
     else
         echo "$ELECTRON_PID" > "$APP_PID_FILE"
@@ -2341,6 +2418,7 @@ prepend_managed_node_runtime_to_path
 source_feature_env_files
 register_url_scheme_handlers
 reconcile_runtime_state
+ensure_packaged_electron_executable
 detect_warm_start
 trap cleanup_launcher EXIT
 
@@ -2366,11 +2444,24 @@ else
     log_phase "warm_start_ready"
 fi
 
-if needs_cold_start && [ -z "${CODEX_CLI_PATH:-}" ]; then
+# Resolve the Codex CLI for EVERY path that launches Electron, not just cold
+# start. A successful warm-start IPC handoff already exited above, so anything
+# still running here will spawn an Electron process (cold start, second-instance
+# handoff, or warm-start-IPC-unavailable fallback). The packaged app's
+# app-server transport resolves `codex` from CODEX_CLI_PATH / PATH / its bundled
+# resources; GUI/browser-launched processes (e.g. an OAuth `codex://` redirect)
+# inherit neither the user's interactive PATH nor shell rc exports, so without
+# this the handoff Electron throws "Unable to locate the Codex CLI binary" and
+# breaks plugin OAuth. find_codex_cli short-circuits on `command -v codex`, so
+# this stays cheap when codex is already on PATH.
+if [ -z "${CODEX_CLI_PATH:-}" ]; then
     CODEX_CLI_PATH="$(find_codex_cli || true)"
     export CODEX_CLI_PATH
     log_phase "cli_lookup"
 fi
+# Mirror the resolved CLI into <resources>/codex-linux so the packaged app's
+# transport can still find it even on env-stripped GUI handoffs.
+stage_resources_codex_cli_fallback
 export CHROME_DESKTOP="${CHROME_DESKTOP:-$CODEX_LINUX_APP_ID.desktop}"
 if truthy_env_value "${CODEX_LINUX_PIN_RENDERER_URL:-}" && ! truthy_env_value "${CODEX_LINUX_ALLOW_RENDERER_URL_OVERRIDE:-}"; then
     if [ -n "${ELECTRON_RENDERER_URL:-}" ] && [ "$ELECTRON_RENDERER_URL" != "$WEBVIEW_ORIGIN/" ]; then

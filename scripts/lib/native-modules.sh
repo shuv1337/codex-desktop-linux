@@ -284,6 +284,21 @@ install_native_modules_from_source() {
 }
 
 # ---- Download Linux Electron ----
+prepare_packaged_electron_executable() {
+    local source="$INSTALL_DIR/electron"
+    local target="$INSTALL_DIR/${CODEX_APP_ID}-electron"
+
+    [ -x "$source" ] || error "Electron runtime binary not found: $source"
+    rm -f "$target"
+    if ln "$source" "$target" 2>/dev/null || cp -p "$source" "$target"; then
+        chmod +x "$target"
+        info "Packaged Electron executable ready: ${CODEX_APP_ID}-electron"
+        return 0
+    fi
+
+    error "Failed to create packaged Electron executable: $target"
+}
+
 download_electron() {
     info "Downloading Electron v${ELECTRON_VERSION} for Linux..."
 
@@ -303,6 +318,7 @@ download_electron() {
         mkdir -p "$INSTALL_DIR"
         cd "$INSTALL_DIR"
         unzip -qo "$WORK_DIR/electron.zip"
+        prepare_packaged_electron_executable
         info "Electron ready"
         return 0
     fi
@@ -331,6 +347,7 @@ download_electron() {
     mkdir -p "$INSTALL_DIR"
     cd "$INSTALL_DIR"
     unzip -qo "$WORK_DIR/electron.zip"
+    prepare_packaged_electron_executable
 
     info "Electron ready"
 }

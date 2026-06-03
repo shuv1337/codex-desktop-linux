@@ -145,8 +145,13 @@ function applyLinuxOpaqueBackgroundPatch(currentSource) {
   }
 
   const [, transparentVar, darkVar, lightVar] = colorMatch;
+  // Upstream restructured the return body across versions. Older builds opened
+  // with `return <platform>===`win32`&&!<pred>(<appearance>)`; newer builds open
+  // with `return <opaque>&&!<pred>(<appearance>)&&(...)`. Both still gate the
+  // transparent-appearance check through `!<pred>(<appearance>)`, so capture the
+  // four named params first and resolve the predicate from that call lazily.
   const funcParamRegex =
-    /function\s+[A-Za-z_$][\w$]*\(\{platform:([A-Za-z_$][\w$]*),appearance:([A-Za-z_$][\w$]*),opaqueWindowsEnabled:[A-Za-z_$][\w$]*,prefersDarkColors:([A-Za-z_$][\w$]*)\}\)\{return\s*\1===`win32`&&!([A-Za-z_$][\w$]*)\(\2\)/;
+    /function\s+[A-Za-z_$][\w$]*\(\{platform:([A-Za-z_$][\w$]*),appearance:([A-Za-z_$][\w$]*),opaqueWindowsEnabled:[A-Za-z_$][\w$]*,prefersDarkColors:([A-Za-z_$][\w$]*)\}\)\{return[^{}]*?!([A-Za-z_$][\w$]*)\(\2\)/;
   const funcMatch = currentSource.match(funcParamRegex);
 
   if (funcMatch == null) {
@@ -336,24 +341,24 @@ function applyLinuxExplicitTrayQuitPatch(currentSource) {
 
   const quitMarkerExpression = linuxExplicitQuitExpression();
 
-  const trayQuitNeedle = "{label:rB(this.appName),click:()=>{n.app.quit()}}";
-  const trayQuitPatch =
-    `{label:rB(this.appName),click:()=>{${quitMarkerExpression}n.app.quit()}}`;
+  // The tray quit menu item is `{label:<labelFn>(this.appName),click:()=>{<electron>.app.quit()}}`.
+  // Both the label helper (`rB`→`SY`) and the electron module alias (`n`→`i`)
+  // drift across upstream minifier runs, so capture both instead of hardcoding.
   const trayQuitRegex =
-    /\{label:rB\(([^)]+)\),click:\(\)=>\{([A-Za-z_$][\w$]*)\.app\.quit\(\)\}\}/;
-  if (patchedSource.includes(trayQuitPatch)) {
+    /\{label:([A-Za-z_$][\w$]*)\(([^)]*this\.appName[^)]*)\),click:\(\)=>\{([A-Za-z_$][\w$]*)\.app\.quit\(\)\}\}/;
+  const alreadyPatchedTrayQuitRegex =
+    /\{label:[A-Za-z_$][\w$]*\([^)]*this\.appName[^)]*\),click:\(\)=>\{typeof codexLinuxPrepareForExplicitQuit/;
+  if (alreadyPatchedTrayQuitRegex.test(patchedSource)) {
     // Already patched.
-  } else if (patchedSource.includes(trayQuitNeedle)) {
-    patchedSource = patchedSource.replace(trayQuitNeedle, trayQuitPatch);
   } else if (trayQuitRegex.test(patchedSource)) {
     patchedSource = patchedSource.replace(
       trayQuitRegex,
-      (_match, appNameExpr, electronVar) =>
-        `{label:rB(${appNameExpr}),click:()=>{${quitMarkerExpression}${electronVar}.app.quit()}}`,
+      (_match, labelFn, appNameExpr, electronVar) =>
+        `{label:${labelFn}(${appNameExpr}),click:()=>{${quitMarkerExpression}${electronVar}.app.quit()}}`,
     );
   } else if (
     patchedSource.includes("getNativeTrayMenuItems(){") &&
-    (patchedSource.includes("label:rB(") || patchedSource.includes("role:`quit`"))
+    (/label:[A-Za-z_$][\w$]*\(this\.appName\)/.test(patchedSource) || patchedSource.includes("role:`quit`"))
   ) {
     console.warn("WARN: Could not find tray quit menu handler — skipping Linux explicit tray quit patch");
   }
@@ -390,6 +395,11 @@ function applyLinuxExplicitIpcQuitPatch(currentSource) {
 function applyLinuxTrayPatch(currentSource, iconPathExpression) {
   let patchedSource = currentSource;
 
+  // The electron module alias drifts across minifier runs (`n`→`i`). Resolve it
+  // from the Tray instantiation so patches that synthesize new `<electron>.Menu`
+  // references stay aligned with the surrounding bundle.
+  const electronVar = currentSource.match(/new ([A-Za-z_$][\w$]*)\.Tray/)?.[1] ?? "n";
+
   const trayGuardNeedle =
     "process.platform!==`win32`&&process.platform!==`darwin`?null:";
   const trayGuardPatch =
@@ -399,7 +409,9 @@ function applyLinuxTrayPatch(currentSource, iconPathExpression) {
     // Already patched.
   } else if (
     trayGuardIndex !== -1 &&
-    patchedSource.slice(trayGuardIndex, trayGuardIndex + TRAY_GUARD_LOOKAHEAD).includes("new n.Tray")
+    /new [A-Za-z_$][\w$]*\.Tray/.test(
+      patchedSource.slice(trayGuardIndex, trayGuardIndex + TRAY_GUARD_LOOKAHEAD),
+    )
   ) {
     patchedSource = patchedSource.replace(trayGuardNeedle, trayGuardPatch);
   } else {
@@ -407,14 +419,18 @@ function applyLinuxTrayPatch(currentSource, iconPathExpression) {
   }
 
   if (iconPathExpression != null) {
-    const trayIconNeedle =
-      "for(let e of o){let t=n.nativeImage.createFromPath(e);if(!t.isEmpty())return{defaultIcon:t,chronicleRunningIcon:null}}return{defaultIcon:await n.app.getFileIcon(process.execPath,{size:process.platform===`win32`?`small`:`normal`}),chronicleRunningIcon:null}}";
-    const trayIconPatch =
-      `for(let e of o){let t=n.nativeImage.createFromPath(e);if(!t.isEmpty())return{defaultIcon:t,chronicleRunningIcon:null}}if(process.platform===\`linux\`){let e=n.nativeImage.createFromPath(${iconPathExpression});if(!e.isEmpty())return{defaultIcon:e,chronicleRunningIcon:null}}return{defaultIcon:await n.app.getFileIcon(process.execPath,{size:process.platform===\`win32\`?\`small\`:\`normal\`}),chronicleRunningIcon:null}}`;
+    // The loop variable (`o`→`a`) and the electron module alias (`n`→`i`) drift
+    // across minifier runs, so capture both instead of hardcoding `n.`/`o`.
+    const trayIconRegex =
+      /for\(let ([A-Za-z_$][\w$]*) of ([A-Za-z_$][\w$]*)\)\{let ([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\.nativeImage\.createFromPath\(\1\);if\(!\3\.isEmpty\(\)\)return\{defaultIcon:\3,chronicleRunningIcon:null\}\}return\{defaultIcon:await ([A-Za-z_$][\w$]*)\.app\.getFileIcon\(process\.execPath,\{size:process\.platform===`win32`\?`small`:`normal`\}\),chronicleRunningIcon:null\}\}/;
     if (patchedSource.includes(`nativeImage.createFromPath(${iconPathExpression})`)) {
       // Already patched.
-    } else if (patchedSource.includes(trayIconNeedle)) {
-      patchedSource = patchedSource.replace(trayIconNeedle, trayIconPatch);
+    } else if (trayIconRegex.test(patchedSource)) {
+      patchedSource = patchedSource.replace(
+        trayIconRegex,
+        (_match, loopVar, listVar, imgVar, imageElectronVar, appElectronVar) =>
+          `for(let ${loopVar} of ${listVar}){let ${imgVar}=${imageElectronVar}.nativeImage.createFromPath(${loopVar});if(!${imgVar}.isEmpty())return{defaultIcon:${imgVar},chronicleRunningIcon:null}}if(process.platform===\`linux\`){let ${imgVar}=${imageElectronVar}.nativeImage.createFromPath(${iconPathExpression});if(!${imgVar}.isEmpty())return{defaultIcon:${imgVar},chronicleRunningIcon:null}}return{defaultIcon:await ${appElectronVar}.app.getFileIcon(process.execPath,{size:process.platform===\`win32\`?\`small\`:\`normal\`}),chronicleRunningIcon:null}}`,
+      );
     } else {
       console.warn("WARN: Could not find tray icon fallback — skipping Linux tray icon patch");
     }
@@ -426,8 +442,11 @@ function applyLinuxTrayPatch(currentSource, iconPathExpression) {
     "if((process.platform===`win32`||process.platform===`linux`)&&f===`local`&&!this.isAppQuitting&&this.options.canHideLastLocalWindowToTray?.()===!0&&!t){e.preventDefault(),k.hide();return}";
   const closeToTrayPatch =
     "if((process.platform===`win32`||process.platform===`linux`)&&f===`local`&&!this.isAppQuitting&&!(typeof codexLinuxIsQuitInProgress===`function`&&codexLinuxIsQuitInProgress())&&this.options.canHideLastLocalWindowToTray?.()===!0&&!t){e.preventDefault(),k.hide();return}";
+  // Already-patched detector. The host clause (`<host>===`local`&&`) became
+  // optional upstream, and the tray method was renamed
+  // `canHideLastLocalWindowToTray`→`canHideLastWindowToTray`, so accept either.
   const patchedCloseToTrayRegex =
-    /if\(\(process\.platform===`win32`\|\|process\.platform===`linux`\)&&[A-Za-z_$][\w$]*===`local`&&!this\.isAppQuitting&&!\(typeof codexLinuxIsQuitInProgress===`function`&&codexLinuxIsQuitInProgress\(\)\)&&this\.options\.canHideLastLocalWindowToTray\?\.\(\)===!0&&![A-Za-z_$][\w$]*\)\{[A-Za-z_$][\w$]*\.preventDefault\(\),[A-Za-z_$][\w$]*\.hide\(\);return\}/;
+    /if\(\(process\.platform===`win32`\|\|process\.platform===`linux`\)&&(?:[A-Za-z_$][\w$]*===`local`&&)?!this\.isAppQuitting&&!\(typeof codexLinuxIsQuitInProgress===`function`&&codexLinuxIsQuitInProgress\(\)\)&&this\.options\.canHideLast(?:Local)?WindowToTray\?\.\(\)===!0&&![A-Za-z_$][\w$]*\)\{[A-Za-z_$][\w$]*\.preventDefault\(\),[A-Za-z_$][\w$]*\.hide\(\);return\}/;
   if (patchedSource.includes(closeToTrayPatch)) {
     // Already patched.
   } else if (patchedSource.includes(closeToTrayExistingPatch)) {
@@ -437,14 +456,17 @@ function applyLinuxTrayPatch(currentSource, iconPathExpression) {
   } else if (patchedCloseToTrayRegex.test(patchedSource)) {
     // Already patched with a newer minifier's window variable.
   } else {
+    // Unpatched fallback. Capture the optional host clause and the (possibly
+    // renamed) tray method so we re-emit them verbatim while injecting the
+    // `||linux` platform branch and the quit-in-progress guard.
     const closeToTrayRegex =
-      /if\(process\.platform===`win32`&&([A-Za-z_$][\w$]*)===`local`&&!this\.isAppQuitting&&this\.options\.canHideLastLocalWindowToTray\?\.\(\)===!0&&!([A-Za-z_$][\w$]*)\)\{([A-Za-z_$][\w$]*)\.preventDefault\(\),([A-Za-z_$][\w$]*)\.hide\(\);return\}/;
+      /if\(process\.platform===`win32`&&((?:[A-Za-z_$][\w$]*===`local`&&)?)!this\.isAppQuitting&&this\.options\.(canHideLast(?:Local)?WindowToTray)\?\.\(\)===!0&&!([A-Za-z_$][\w$]*)\)\{([A-Za-z_$][\w$]*)\.preventDefault\(\),([A-Za-z_$][\w$]*)\.hide\(\);return\}/;
     const closeToTrayMatch = patchedSource.match(closeToTrayRegex);
     if (closeToTrayMatch != null) {
-      const [, hostVar, hasOtherWindowVar, eventVar, windowVar] = closeToTrayMatch;
+      const [, hostClause, trayMethod, hasOtherWindowVar, eventVar, windowVar] = closeToTrayMatch;
       patchedSource = patchedSource.replace(
         closeToTrayRegex,
-        `if((process.platform===\`win32\`||process.platform===\`linux\`)&&${hostVar}===\`local\`&&!this.isAppQuitting&&!(typeof codexLinuxIsQuitInProgress===\`function\`&&codexLinuxIsQuitInProgress())&&this.options.canHideLastLocalWindowToTray?.()===!0&&!${hasOtherWindowVar}){${eventVar}.preventDefault(),${windowVar}.hide();return}`,
+        `if((process.platform===\`win32\`||process.platform===\`linux\`)&&${hostClause}!this.isAppQuitting&&!(typeof codexLinuxIsQuitInProgress===\`function\`&&codexLinuxIsQuitInProgress())&&this.options.${trayMethod}?.()===!0&&!${hasOtherWindowVar}){${eventVar}.preventDefault(),${windowVar}.hide();return}`,
       );
     } else {
       console.warn("WARN: Could not find close-to-tray condition — skipping Linux close-to-tray patch");
@@ -454,7 +476,7 @@ function applyLinuxTrayPatch(currentSource, iconPathExpression) {
   const trayContextMethodNeedle =
     "trayMenuThreads={runningThreads:[],unreadThreads:[],pinnedThreads:[],recentThreads:[],usageLimits:[]};constructor(";
   const trayContextMethodPatch =
-    "trayMenuThreads={runningThreads:[],unreadThreads:[],pinnedThreads:[],recentThreads:[],usageLimits:[]};setLinuxTrayContextMenu(){let e=n.Menu.buildFromTemplate(this.getNativeTrayMenuItems());this.tray.setContextMenu?.(e);return e}constructor(";
+    `trayMenuThreads={runningThreads:[],unreadThreads:[],pinnedThreads:[],recentThreads:[],usageLimits:[]};setLinuxTrayContextMenu(){let e=${electronVar}.Menu.buildFromTemplate(this.getNativeTrayMenuItems());this.tray.setContextMenu?.(e);return e}constructor(`;
   if (patchedSource.includes("setLinuxTrayContextMenu(){")) {
     // Already patched.
   } else if (patchedSource.includes(trayContextMethodNeedle)) {
@@ -484,11 +506,11 @@ function applyLinuxTrayPatch(currentSource, iconPathExpression) {
   }
 
   const trayMenuBuildNeedle =
-    "openNativeTrayMenu(){this.updateChronicleTrayIcon();let e=n.Menu.buildFromTemplate(this.getNativeTrayMenuItems());";
+    `openNativeTrayMenu(){this.updateChronicleTrayIcon();let e=${electronVar}.Menu.buildFromTemplate(this.getNativeTrayMenuItems());`;
   const trayMenuBuildExistingPatch =
-    "openNativeTrayMenu(){this.updateChronicleTrayIcon();let e=process.platform===`linux`&&this.setLinuxTrayContextMenu?this.setLinuxTrayContextMenu():n.Menu.buildFromTemplate(this.getNativeTrayMenuItems());";
+    `openNativeTrayMenu(){this.updateChronicleTrayIcon();let e=process.platform===\`linux\`&&this.setLinuxTrayContextMenu?this.setLinuxTrayContextMenu():${electronVar}.Menu.buildFromTemplate(this.getNativeTrayMenuItems());`;
   const trayMenuBuildPatch =
-    "openNativeTrayMenu(){if(process.platform===`linux`&&(typeof codexLinuxIsQuitInProgress===`function`&&codexLinuxIsQuitInProgress()))return;this.updateChronicleTrayIcon();let e=process.platform===`linux`&&this.setLinuxTrayContextMenu?this.setLinuxTrayContextMenu():n.Menu.buildFromTemplate(this.getNativeTrayMenuItems());";
+    `openNativeTrayMenu(){if(process.platform===\`linux\`&&(typeof codexLinuxIsQuitInProgress===\`function\`&&codexLinuxIsQuitInProgress()))return;this.updateChronicleTrayIcon();let e=process.platform===\`linux\`&&this.setLinuxTrayContextMenu?this.setLinuxTrayContextMenu():${electronVar}.Menu.buildFromTemplate(this.getNativeTrayMenuItems());`;
   if (patchedSource.includes("openNativeTrayMenu(){if(process.platform===`linux`&&(typeof codexLinuxIsQuitInProgress===`function`&&codexLinuxIsQuitInProgress()))return;")) {
     // Already patched.
   } else if (patchedSource.includes(trayMenuBuildExistingPatch)) {
@@ -635,10 +657,18 @@ function applyLinuxBrowserUseIabVisibleOnCreatePatch(currentSource) {
     return currentSource;
   }
 
-  const visibilityExpr = (hostExpr, sessionExpr) =>
-    `(()=>{try{${hostExpr}.setBrowserVisibleForBrowserUse(!0,${sessionExpr}.turnId)}catch(__codexLinuxErr){console.warn("${marker}",__codexLinuxErr?.message??__codexLinuxErr)}})()`;
+  // `setBrowserVisibleForBrowserUse`/`setBrowserUseActive`/`openPageForBrowserUse`
+  // dropped their `turnId` argument across upstream versions. The visibility
+  // call mirrors whatever shape the surrounding bundle uses: `turnIdSuffix` is
+  // resolved per match (empty for the newer no-arg APIs) so we stay compatible
+  // with both the old `,<session>.turnId` and the new no-arg form.
+  const visibilityExpr = (hostExpr, turnIdSuffix) =>
+    `(()=>{try{${hostExpr}.setBrowserVisibleForBrowserUse(!0${turnIdSuffix})}catch(__codexLinuxErr){console.warn("${marker}",__codexLinuxErr?.message??__codexLinuxErr)}})()`;
+  // Optional turnId args use non-capturing groups so the `\4`/`\5` backreferences
+  // for pageVar/tabInfoVar keep their original positions. The exact arg text is
+  // recovered from the matched needle afterwards so we re-emit it verbatim.
   const createTabRegex =
-    /if\(([A-Za-z_$][\w$]*)!=null\)return await this\.navigateTabToInitialPage\(\1\),this\.serializeTab\(\1\);let ([A-Za-z_$][\w$]*)=this\.getRequiredBrowserHost\(([A-Za-z_$][\w$]*)\);\2\.setBrowserUseActive\(!0,\3\.turnId\);let ([A-Za-z_$][\w$]*)=await \2\.openPageForBrowserUse\(\{startingUrl:this\.initialPageUrl,turnId:\3\.turnId\}\),([A-Za-z_$][\w$]*)=this\.updateTabForPage\(\4,\2\.routeKey\);return/;
+    /if\(([A-Za-z_$][\w$]*)!=null\)return await this\.navigateTabToInitialPage\(\1\),this\.serializeTab\(\1\);let ([A-Za-z_$][\w$]*)=this\.getRequiredBrowserHost\(([A-Za-z_$][\w$]*)\);\2\.setBrowserUseActive\(!0(?:,\3\.turnId)?\);let ([A-Za-z_$][\w$]*)=await \2\.openPageForBrowserUse\(\{startingUrl:this\.initialPageUrl(?:,turnId:\3\.turnId)?\}\),([A-Za-z_$][\w$]*)=this\.updateTabForPage\(\4,\2\.routeKey\);return/;
   const match = currentSource.match(createTabRegex);
   if (match == null) {
     if (
@@ -653,15 +683,20 @@ function applyLinuxBrowserUseIabVisibleOnCreatePatch(currentSource) {
   }
 
   const [needle, tabVar, hostVar, sessionVar, pageVar, tabInfoVar] = match;
+  const activeTurnIdArg = needle.includes(`setBrowserUseActive(!0,${sessionVar}.turnId)`) ? `,${sessionVar}.turnId` : "";
+  const openTurnIdArg = needle.includes(`turnId:${sessionVar}.turnId}`) ? `,turnId:${sessionVar}.turnId` : "";
+  // Mirror the bundle's visibility-call shape: include `,<session>.turnId` only
+  // when the older turnId-bearing APIs are present.
+  const visibilityTurnIdSuffix = activeTurnIdArg;
   const activeTabVisibility = visibilityExpr(
     `this.getRequiredBrowserHost(${sessionVar})`,
-    sessionVar,
+    visibilityTurnIdSuffix,
   );
-  const newTabVisibility = visibilityExpr(hostVar, sessionVar);
+  const newTabVisibility = visibilityExpr(hostVar, visibilityTurnIdSuffix);
   const replacement =
     `if(${tabVar}!=null)return await this.navigateTabToInitialPage(${tabVar}),${activeTabVisibility},this.serializeTab(${tabVar});` +
-    `let ${hostVar}=this.getRequiredBrowserHost(${sessionVar});${hostVar}.setBrowserUseActive(!0,${sessionVar}.turnId);` +
-    `let ${pageVar}=await ${hostVar}.openPageForBrowserUse({startingUrl:this.initialPageUrl,turnId:${sessionVar}.turnId}),${tabInfoVar}=this.updateTabForPage(${pageVar},${hostVar}.routeKey);` +
+    `let ${hostVar}=this.getRequiredBrowserHost(${sessionVar});${hostVar}.setBrowserUseActive(!0${activeTurnIdArg});` +
+    `let ${pageVar}=await ${hostVar}.openPageForBrowserUse({startingUrl:this.initialPageUrl${openTurnIdArg}}),${tabInfoVar}=this.updateTabForPage(${pageVar},${hostVar}.routeKey);` +
     `return ${newTabVisibility},`;
 
   return currentSource.replace(needle, replacement);
@@ -778,14 +813,18 @@ function applyLinuxGitOriginsSourceFallbackPatch(currentSource) {
     return currentSource.replace(currentExactNeedle, currentExactReplacement);
   }
 
+  // The guard method (`Gt`→`_n`), the operation-context dispatch method
+  // (`Gt`→`lt`), and all the local variable names drift across minifier runs.
+  // Capture the dispatch method name (\7) too so the synthesized git-origins
+  // fallback calls the same method the surrounding bundle uses.
   const dynamicRegex =
-    /if\(([A-Za-z_$][\w$]*)==null\)\{if\(([A-Za-z_$][\w$]*)\.([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*)\)\)throw Error\(`Missing git operation source for \$\{\4\}`\);return ([A-Za-z_$][\w$]*)\(\)\}return ([A-Za-z_$][\w$]*)\.Gt\(\{source:\1,requestKind:\4\},\5\)/;
+    /if\(([A-Za-z_$][\w$]*)==null\)\{if\(([A-Za-z_$][\w$]*)\.([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*)\)\)throw Error\(`Missing git operation source for \$\{\4\}`\);return ([A-Za-z_$][\w$]*)\(\)\}return ([A-Za-z_$][\w$]*)\.([A-Za-z_$][\w$]*)\(\{source:\1,requestKind:\4\},\5\)/;
   const dynamicMatch = currentSource.match(dynamicRegex);
   if (dynamicMatch != null) {
-    const [, sourceVar, gitGuardVar, guardFn, requestKindVar, callVar, operationContextVar] = dynamicMatch;
+    const [, sourceVar, gitGuardVar, guardFn, requestKindVar, callVar, operationContextVar, dispatchFn] = dynamicMatch;
     return currentSource.replace(
       dynamicRegex,
-      `if(${sourceVar}==null){if(${gitGuardVar}.${guardFn}(${requestKindVar})){if(${requestKindVar}===\`git-origins\`)return ${operationContextVar}.Gt({source:\`${fallbackSource}\`,requestKind:${requestKindVar}},${callVar});throw Error(\`Missing git operation source for \${${requestKindVar}}\`)}return ${callVar}()}return ${operationContextVar}.Gt({source:${sourceVar},requestKind:${requestKindVar}},${callVar})`,
+      `if(${sourceVar}==null){if(${gitGuardVar}.${guardFn}(${requestKindVar})){if(${requestKindVar}===\`git-origins\`)return ${operationContextVar}.${dispatchFn}({source:\`${fallbackSource}\`,requestKind:${requestKindVar}},${callVar});throw Error(\`Missing git operation source for \${${requestKindVar}}\`)}return ${callVar}()}return ${operationContextVar}.${dispatchFn}({source:${sourceVar},requestKind:${requestKindVar}},${callVar})`,
     );
   }
 

@@ -152,6 +152,20 @@ function applyCurrentBootstrapUpdaterBridgePatch(currentSource) {
     return currentSource;
   }
 
+  // Upstream can split the sparkle-bridge surface across several bundle chunks
+  // (e.g. a worker / workspace-root-drop-handler chunk references
+  // `setSparkleBridgeHandlers` without owning the bridge bootstrap). Only the
+  // chunk that actually owns the disabled-state singleton (or that we have
+  // already patched) is a real insertion point; bail out quietly on the others
+  // before checking module bindings so unrelated chunks do not emit a spurious
+  // "module bindings" warning.
+  if (
+    !currentSource.includes("function codexLinuxCreatePackageUpdateManager(") &&
+    !currentSource.includes("state:`disabled`")
+  ) {
+    return currentSource;
+  }
+
   const childProcessVar =
     requireName(currentSource, "node:child_process") ?? requireName(currentSource, "child_process");
   const electronVar = requireName(currentSource, "electron") ?? requireName(currentSource, "node:electron");
@@ -167,11 +181,17 @@ function applyCurrentBootstrapUpdaterBridgePatch(currentSource) {
     if (!patchedSource.includes("state:`disabled`")) {
       return currentSource;
     }
-    const bootstrapNeedle = "var rK={enabled:!1,running:!1,state:`disabled`};";
-    if (!patchedSource.includes(bootstrapNeedle)) {
+    // The disabled-state singleton var name drifts (`rK`→`Z0`), so match the
+    // stable object shape generically and re-insert the original declaration
+    // verbatim ahead of our bootstrap bridge source.
+    const bootstrapNeedleRegex =
+      /var [A-Za-z_$][\w$]*=\{enabled:!1,running:!1,state:`disabled`\};/;
+    const bootstrapMatch = patchedSource.match(bootstrapNeedleRegex);
+    if (bootstrapMatch == null) {
       console.warn("WARN: Could not find current updater bridge insertion point - skipping Linux updater bridge patch");
       return currentSource;
     }
+    const bootstrapNeedle = bootstrapMatch[0];
     patchedSource = patchedSource.replace(
       bootstrapNeedle,
       `${buildBootstrapBridgeSource({ childProcessVar, electronVar, fsVar, pathVar })};${bootstrapNeedle}`,
@@ -204,17 +224,26 @@ function applyCurrentBootstrapUpdaterBridgePatch(currentSource) {
   }
 
   if (!patchedSource.includes("codexLinuxPackageUpdateBridge=process.platform===`linux`")) {
+    // The quit controller declaration drifted: upstream added an intervening
+    // declarator (`,re=null`) and turned the quit callback into an arg-taking
+    // function with a `quitImmediately` early-return branch
+    // (`<fn>=e=>{if(e?.quitImmediately===!1){<ctrl>.allowQuit...();return}<ctrl>.allowQuit...(),<el>.app.quit()}`).
+    // Rather than reconstruct that body, capture the full declaration plus its
+    // controller/callback variable names and append the bridge wiring before the
+    // terminating `;`, preserving whatever quit-function shape upstream ships.
     const bridgeRegex =
-      /let ([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\(\),([A-Za-z_$][\w$]*)=\(\)=>\{\1\.allowQuitTemporarilyForUpdateInstall\(\),([A-Za-z_$][\w$]*)\.app\.quit\(\)\};/;
+      /let ([A-Za-z_$][\w$]*)=[A-Za-z_$][\w$]*\(\),(?:[A-Za-z_$][\w$]*=[^,;]*,)*?([A-Za-z_$][\w$]*)=(?:\(\)|[A-Za-z_$][\w$]*)=>\{[\s\S]*?\1\.allowQuitTemporarilyForUpdateInstall\(\),[A-Za-z_$][\w$]*\.app\.quit\(\)\};/;
     const bridgeMatch = patchedSource.match(bridgeRegex);
     if (bridgeMatch == null) {
       console.warn("WARN: Could not find current updater callback bridge - skipping Linux updater bridge patch");
       return currentSource;
     }
-    const [, quitControllerVar, quitFactoryVar, quitFnVar, electronBindingVar] = bridgeMatch;
+    const [bridgeDeclaration, quitControllerVar, quitFnVar] = bridgeMatch;
+    // Drop the trailing `;` so we can extend the `let` declaration list.
+    const declarationHead = bridgeDeclaration.slice(0, -1);
     const replacement =
-      `let ${quitControllerVar}=${quitFactoryVar}(),${quitFnVar}=()=>{${quitControllerVar}.allowQuitTemporarilyForUpdateInstall(),${electronBindingVar}.app.quit()},codexLinuxPackageUpdateBridge=process.platform===\`linux\`?codexLinuxCreatePackageUpdateManager({allowQuit:()=>${quitControllerVar}.allowQuitTemporarilyForUpdateInstall(),send:e=>${messageDispatcherVar}.sendMessageToAllRegisteredWindows(e)}):null;codexLinuxPackageUpdateBridge!=null&&(${sparkleVar}=codexLinuxPackageUpdateBridge.manager,${quitFnVar}=codexLinuxPackageUpdateBridge.quitForUpdate,setInterval(()=>codexLinuxPackageUpdateBridge.refresh(),3e4).unref?.());`;
-    patchedSource = patchedSource.replace(bridgeRegex, replacement);
+      `${declarationHead},codexLinuxPackageUpdateBridge=process.platform===\`linux\`?codexLinuxCreatePackageUpdateManager({allowQuit:()=>${quitControllerVar}.allowQuitTemporarilyForUpdateInstall(),send:e=>${messageDispatcherVar}.sendMessageToAllRegisteredWindows(e)}):null;codexLinuxPackageUpdateBridge!=null&&(${sparkleVar}=codexLinuxPackageUpdateBridge.manager,${quitFnVar}=codexLinuxPackageUpdateBridge.quitForUpdate,setInterval(()=>codexLinuxPackageUpdateBridge.refresh(),3e4).unref?.());`;
+    patchedSource = patchedSource.replace(bridgeDeclaration, replacement);
   }
 
   return patchedSource;
@@ -315,22 +344,24 @@ function applyLinuxAppUpdaterBridgePatch(currentSource) {
 }
 
 function applyLinuxAppUpdaterMenuPatch(currentSource) {
-  const menuNeedles = [
-    "d=t.C.shouldIncludeSparkle(a,process.platform,process.env)",
-    "d=t.T.shouldIncludeSparkle(a,process.platform,process.env)",
-  ];
-
-  if (/d=t\.[A-Za-z_$][\w$]*\.shouldIncludeSparkle\(a,process\.platform,process\.env\)\|\|process\.platform===`linux`/.test(currentSource)) {
+  // The assignment target (`d`→`p`), the namespace object (`t.T`→`n.j`), and the
+  // first argument (`a`→`s`) all drift across minifier runs, so match the stable
+  // `shouldIncludeSparkle(<arg>,process.platform,process.env)` shape generically.
+  const alreadyPatchedRegex =
+    /=[A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*\.shouldIncludeSparkle\([A-Za-z_$][\w$]*,process\.platform,process\.env\)\|\|process\.platform===`linux`/;
+  if (alreadyPatchedRegex.test(currentSource)) {
     return currentSource;
   }
-  const menuNeedle = menuNeedles.find((needle) => currentSource.includes(needle));
-  if (menuNeedle == null) {
+  const menuNeedleRegex =
+    /=[A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*\.shouldIncludeSparkle\([A-Za-z_$][\w$]*,process\.platform,process\.env\)/;
+  const menuMatch = currentSource.match(menuNeedleRegex);
+  if (menuMatch == null) {
     if (currentSource.includes("enableSparkle") && currentSource.includes("shouldIncludeSparkle")) {
       console.warn("WARN: Could not find update menu feature gate - skipping Linux update menu patch");
     }
     return currentSource;
   }
-  return currentSource.replace(menuNeedle, `${menuNeedle}||process.platform===\`linux\``);
+  return currentSource.replace(menuMatch[0], `${menuMatch[0]}||process.platform===\`linux\``);
 }
 
 function patchLinuxAppUpdaterBridge(extractedDir) {

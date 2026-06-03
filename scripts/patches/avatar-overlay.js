@@ -96,23 +96,28 @@ function applyLinuxAvatarOverlayMousePassthroughPatch(currentSource) {
     "startDrag(e,{pointerWindowX:t,pointerWindowY:r}){let i=this.window;if(i==null||i.isDestroyed()||i.webContents.id!==e)return;this.pointerInteractive=!0,this.applyPointerInteractivityPolicy(),this.cancelMomentum();";
   const originalStartDragPrefix =
     "startDrag(e,{pointerWindowX:t,pointerWindowY:r}){let i=this.window;if(i==null||i.isDestroyed()||i.webContents.id!==e)return;this.cancelMomentum();";
-  const startDragNeedle =
-    "displayBounds:n.screen.getDisplayNearestPoint(n.screen.getCursorScreenPoint()).bounds}}moveDrag(e){";
-  const startDragPatch =
-    "displayBounds:n.screen.getDisplayNearestPoint(n.screen.getCursorScreenPoint()).bounds},process.platform===`linux`&&(this.pointerInteractive=!0,this.applyPointerInteractivityPolicy())}moveDrag(e){";
-  const previousStartDragAfterStatePatch =
-    "displayBounds:n.screen.getDisplayNearestPoint(n.screen.getCursorScreenPoint()).bounds},this.pointerInteractive=!0,this.applyPointerInteractivityPolicy()}moveDrag(e){";
+  // The dragState assignment closes with `...getCursorScreenPoint()).bounds}`
+  // immediately followed by `}moveDrag(<arg>){`. The electron screen alias
+  // (`n`→`i`) and the moveDrag parameter drift, so anchor on the stable tail
+  // and inject the Linux pointer-interactivity refresh into the close.
+  const startDragTailRegex =
+    /(getCursorScreenPoint\(\)\)\.bounds)\}\}moveDrag\(([A-Za-z_$][\w$]*)\)\{/;
+  const startDragAlreadyPatched =
+    /getCursorScreenPoint\(\)\)\.bounds\},process\.platform===`linux`&&\(this\.pointerInteractive=!0,this\.applyPointerInteractivityPolicy\(\)\)\}moveDrag\(/.test(
+      patchedSource,
+    );
   if (patchedSource.includes(previousStartDragPatch)) {
     patchedSource = patchedSource.replace(previousStartDragPatch, originalStartDragPrefix);
   }
-  if (patchedSource.includes(previousStartDragAfterStatePatch)) {
-    patchedSource = patchedSource.replace(previousStartDragAfterStatePatch, startDragPatch);
-  } else if (patchedSource.includes(startDragNeedle)) {
-    patchedSource = patchedSource.replace(startDragNeedle, startDragPatch);
-  } else if (
-    patchedSource.includes("avatar-overlay") &&
-    !patchedSource.includes(startDragPatch)
-  ) {
+  if (startDragAlreadyPatched) {
+    // Already patched.
+  } else if (startDragTailRegex.test(patchedSource)) {
+    patchedSource = patchedSource.replace(
+      startDragTailRegex,
+      (_match, boundsTail, moveDragArg) =>
+        `${boundsTail}},process.platform===\`linux\`&&(this.pointerInteractive=!0,this.applyPointerInteractivityPolicy())}moveDrag(${moveDragArg}){`,
+    );
+  } else if (patchedSource.includes("avatar-overlay")) {
     console.warn(
       "WARN: Could not find avatar overlay drag start — skipping Linux avatar overlay drag interactivity patch",
     );
@@ -137,20 +142,34 @@ function applyLinuxAvatarOverlayMousePassthroughPatch(currentSource) {
     );
   }
 
-  const setElementSizeNeedle =
-    "setElementSize(e,{mascot:t,tray:n}){let r=this.window;r==null||r.isDestroyed()||r.webContents.id!==e||(this.cancelMomentum(),this.anchor={...this.anchor,width:t.width,height:t.height},this.mascotSize=t,this.traySize=n,this.applyLayout(r))}";
-  const setElementSizePatch =
-    "setElementSize(e,{mascot:t,tray:n}){let r=this.window;r==null||r.isDestroyed()||r.webContents.id!==e||(this.cancelMomentum(),this.anchor={...this.anchor,width:t.width,height:t.height},this.mascotSize=t,this.traySize=n,this.applyLayout(r),process.platform===`linux`&&this.applyPointerInteractivityPolicy())}";
+  // setElementSize gained extra upstream logic (mascot-resize state machine),
+  // but every code path that actually applies the layout still ends with
+  // `this.mascotSize=<m>,this.traySize=<t>,this.applyLayout(<win>)` followed by
+  // the method-closing braces. Anchor on that apply-layout tail and append the
+  // Linux pointer-interactivity refresh right after it. The trailing brace count
+  // varies (`)}` in old single-expression bodies, `)}}` in the newer wrapped
+  // body), so capture it and re-emit verbatim.
   const previousSetElementSizePatch =
     "setElementSize(e,{mascot:t,tray:n}){let r=this.window;r==null||r.isDestroyed()||r.webContents.id!==e||(this.cancelMomentum(),this.anchor={...this.anchor,width:t.width,height:t.height},this.mascotSize=t,this.traySize=n,this.applyLayout(r),this.codexLinuxSyncAvatarPointerInteractivity(r)&&this.applyPointerInteractivityPolicy())}";
+  const setElementSizePatch =
+    "setElementSize(e,{mascot:t,tray:n}){let r=this.window;r==null||r.isDestroyed()||r.webContents.id!==e||(this.cancelMomentum(),this.anchor={...this.anchor,width:t.width,height:t.height},this.mascotSize=t,this.traySize=n,this.applyLayout(r),process.platform===`linux`&&this.applyPointerInteractivityPolicy())}";
+  const setElementSizeTailRegex =
+    /(setElementSize\(e,\{mascot:t,tray:([A-Za-z_$][\w$]*)\}\)\{[\s\S]*?this\.mascotSize=t,this\.traySize=\2,this\.applyLayout\(([A-Za-z_$][\w$]*)\))(\)?\}\}?)/;
+  const setElementSizeAlreadyPatched =
+    /this\.applyLayout\([A-Za-z_$][\w$]*\),process\.platform===`linux`&&this\.applyPointerInteractivityPolicy\(\)/.test(
+      patchedSource,
+    );
   if (patchedSource.includes(previousSetElementSizePatch)) {
     patchedSource = patchedSource.replace(previousSetElementSizePatch, setElementSizePatch);
-  } else if (patchedSource.includes(setElementSizeNeedle)) {
-    patchedSource = patchedSource.replace(setElementSizeNeedle, setElementSizePatch);
-  } else if (
-    patchedSource.includes("avatar-overlay") &&
-    !patchedSource.includes(setElementSizePatch)
-  ) {
+  } else if (setElementSizeAlreadyPatched) {
+    // Already patched.
+  } else if (setElementSizeTailRegex.test(patchedSource)) {
+    patchedSource = patchedSource.replace(
+      setElementSizeTailRegex,
+      (_match, head, _trayVar, winVar, closer) =>
+        `${head},process.platform===\`linux\`&&this.applyPointerInteractivityPolicy()${closer}`,
+    );
+  } else if (patchedSource.includes("avatar-overlay")) {
     console.warn(
       "WARN: Could not find avatar overlay element size update — skipping Linux avatar overlay layout interactivity patch",
     );
@@ -205,20 +224,26 @@ function applyLinuxAvatarOverlayMousePassthroughPatch(currentSource) {
     }
   }
 
-  const applyLayoutNeedle =
-    "this.setWindowBounds(e,r.windowBounds),this.sendLayoutToRenderer(e)}getLayout(e){";
-  const applyLayoutPatch =
-    "this.setWindowBounds(e,r.windowBounds),this.sendLayoutToRenderer(e),process.platform===`linux`&&this.applyPointerInteractivityPolicy()}getLayout(e){";
-  const previousApplyLayoutPatch =
-    "this.setWindowBounds(e,r.windowBounds),this.sendLayoutToRenderer(e),this.codexLinuxSyncAvatarPointerInteractivity(e)&&this.applyPointerInteractivityPolicy()}getLayout(e){";
-  if (patchedSource.includes(previousApplyLayoutPatch)) {
-    patchedSource = patchedSource.replace(previousApplyLayoutPatch, applyLayoutPatch);
-  } else if (patchedSource.includes(applyLayoutNeedle)) {
-    patchedSource = patchedSource.replace(applyLayoutNeedle, applyLayoutPatch);
-  } else if (
-    patchedSource.includes("avatar-overlay") &&
-    !patchedSource.includes(applyLayoutPatch)
-  ) {
+  // applyLayout ends with `this.sendLayoutToRenderer(<win>)}getLayout(...)`.
+  // The layout var (`r`→`i`) drifts, `setWindowBounds` gained an extra arg, and
+  // the `getLayout` parameter varies, so anchor on the `sendLayoutToRenderer`
+  // call that precedes the `getLayout` boundary and inject before the closing
+  // brace.
+  const applyLayoutTailRegex =
+    /(this\.sendLayoutToRenderer\(([A-Za-z_$][\w$]*)\))\}getLayout\(([A-Za-z_$][\w$]*)\)\{/;
+  const applyLayoutAlreadyPatched =
+    /this\.sendLayoutToRenderer\([A-Za-z_$][\w$]*\),process\.platform===`linux`&&this\.applyPointerInteractivityPolicy\(\)\}getLayout\(/.test(
+      patchedSource,
+    );
+  if (applyLayoutAlreadyPatched) {
+    // Already patched.
+  } else if (applyLayoutTailRegex.test(patchedSource)) {
+    patchedSource = patchedSource.replace(
+      applyLayoutTailRegex,
+      (_match, sendCall, _winVar, getLayoutArg) =>
+        `${sendCall},process.platform===\`linux\`&&this.applyPointerInteractivityPolicy()}getLayout(${getLayoutArg}){`,
+    );
+  } else if (patchedSource.includes("avatar-overlay")) {
     console.warn(
       "WARN: Could not find avatar overlay layout application — skipping Linux avatar overlay layout sync patch",
     );
@@ -251,16 +276,31 @@ function applyLinuxAvatarOverlayMousePassthroughPatch(currentSource) {
     );
   }
 
-  const closedNeedle = "this.window===t&&(this.cancelMomentum(),this.window=null,";
+  // The closed-window guard parameter drifts (`t`→`e`). Capture it so the
+  // injected cleanup statements reference the same window variable.
+  const closedNeedleRegex =
+    /this\.window===([A-Za-z_$][\w$]*)&&\(this\.cancelMomentum\(\),this\.window=null,/;
+  const closedVar = patchedSource.match(closedNeedleRegex)?.[1] ?? "t";
+  const closedNeedle = `this.window===${closedVar}&&(this.cancelMomentum(),this.window=null,`;
   const closedPatch =
-    "this.window===t&&(this.codexLinuxStopAvatarPassthroughRecovery(),this.codexLinuxAvatarInputShapeKey=null,this.codexLinuxAvatarCompositorHintsApplied=!1,this.codexLinuxAvatarCompositorHintsApplying=!1,this.cancelMomentum(),this.window=null,";
+    `this.window===${closedVar}&&(this.codexLinuxStopAvatarPassthroughRecovery(),this.codexLinuxAvatarInputShapeKey=null,this.codexLinuxAvatarCompositorHintsApplied=!1,this.codexLinuxAvatarCompositorHintsApplying=!1,this.cancelMomentum(),this.window=null,`;
   const previousCompositorClosedPatch =
     "this.window===t&&(this.codexLinuxStopAvatarPassthroughRecovery(),this.codexLinuxAvatarInputShapeKey=null,this.codexLinuxAvatarCompositorHintsApplied=!1,this.cancelMomentum(),this.window=null,";
   const previousClosedPatch =
     "this.window===t&&(this.codexLinuxStopAvatarPassthroughRecovery(),this.cancelMomentum(),this.window=null,";
   const previousShapeClosedPatch =
     "this.window===t&&(this.codexLinuxStopAvatarPassthroughRecovery(),this.codexLinuxAvatarInputShapeKey=null,this.cancelMomentum(),this.window=null,";
-  if (patchedSource.includes(previousCompositorClosedPatch)) {
+  // Var-agnostic already-patched detector: once injected, the cleanup methods
+  // sit between `this.window===<var>&&(` and `this.cancelMomentum()`, so the
+  // raw `closedNeedle` no longer matches and `closedVar` can mis-resolve. Use a
+  // regex on the injected marker instead so re-runs stay idempotent.
+  const closedAlreadyPatched =
+    /this\.window===[A-Za-z_$][\w$]*&&\(this\.codexLinuxStopAvatarPassthroughRecovery\(\),this\.codexLinuxAvatarInputShapeKey=null,this\.codexLinuxAvatarCompositorHintsApplied=!1,this\.codexLinuxAvatarCompositorHintsApplying=!1,this\.cancelMomentum\(\),this\.window=null,/.test(
+      patchedSource,
+    );
+  if (closedAlreadyPatched) {
+    // Already patched.
+  } else if (patchedSource.includes(previousCompositorClosedPatch)) {
     patchedSource = patchedSource.replace(previousCompositorClosedPatch, closedPatch);
   } else if (patchedSource.includes(previousClosedPatch)) {
     patchedSource = patchedSource.replace(previousClosedPatch, closedPatch);
@@ -270,8 +310,7 @@ function applyLinuxAvatarOverlayMousePassthroughPatch(currentSource) {
     patchedSource = patchedSource.replace(closedNeedle, closedPatch);
   } else if (
     patchedSource.includes("avatar-overlay") &&
-    patchedSource.includes("codexLinuxStartAvatarPassthroughRecovery") &&
-    !patchedSource.includes(closedPatch)
+    patchedSource.includes("codexLinuxStartAvatarPassthroughRecovery")
   ) {
     console.warn(
       "WARN: Could not find avatar overlay close cleanup — skipping Linux avatar overlay passthrough cleanup patch",

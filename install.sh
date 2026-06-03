@@ -21,6 +21,10 @@ CODEX_WEBVIEW_PORT="${CODEX_WEBVIEW_PORT:-$DEFAULT_CODEX_WEBVIEW_PORT}"
 ELECTRON_VERSION="41.3.0"
 ELECTRON_HEADERS_URL="${ELECTRON_HEADERS_URL:-${npm_config_disturl:-${NPM_CONFIG_DISTURL:-https://artifacts.electronjs.org/headers/dist}}}"
 ELECTRON_MIRROR="${ELECTRON_MIRROR:-}"
+# Newest Electron major whose Linux native modules (better-sqlite3) we can build.
+# better-sqlite3 uses raw V8 APIs and has no Electron 42 (V8 13.x) build yet.
+MAX_SUPPORTED_ELECTRON_MAJOR="${CODEX_MAX_ELECTRON_MAJOR:-41}"
+MAX_SUPPORTED_ELECTRON_VERSION="${CODEX_MAX_ELECTRON_VERSION:-41.7.1}"
 MIN_BETTER_SQLITE3_VERSION_FOR_ELECTRON_41="12.9.0"
 WORK_DIR="$(mktemp -d)"
 ARCH="$(uname -m)"
@@ -100,6 +104,7 @@ main() {
     app_dir=$(extract_dmg "$dmg_path")
 
     detect_electron_version "$app_dir"
+    cap_electron_version
     if [ "$INSPECT_ONLY" -eq 1 ]; then
         inspect_rebuild_candidate "$app_dir" "$dmg_path"
         return 0
@@ -119,7 +124,8 @@ main() {
             "$dmg_path" \
             "$ELECTRON_VERSION" \
             "$CODEX_PATCH_REPORT_JSON" \
-            "$INSTALL_DIR"
+            "$INSTALL_DIR" \
+            "${CODEX_UPSTREAM_ELECTRON_VERSION:-$ELECTRON_VERSION}"
         info "Rebuild report: $CODEX_REBUILD_REPORT_JSON"
     fi
 

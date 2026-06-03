@@ -278,6 +278,8 @@ make build-app
 
 `ELECTRON_HEADERS_URL` is passed to `@electron/rebuild --dist-url` and must provide both `node-v<version>-headers.tar.gz` and the matching `SHASUMS256.txt`.
 
+The installer records the upstream-declared Electron version, but caps the Linux build target when upstream ships a major version that native modules cannot build against yet. Today the max buildable major is Electron 41, capped to `41.7.1`; `CODEX_MAX_ELECTRON_MAJOR`, `CODEX_MAX_ELECTRON_VERSION`, and `CODEX_FORCE_ELECTRON_VERSION` are available for one-off compatibility testing.
+
 ## Native package formats
 
 After `make build-app`, build a native package from `codex-app/` with the format you need:
@@ -353,7 +355,7 @@ make clean-state
 ## How it works
 
 1. `install.sh` extracts `Codex.dmg` with `7z`/`7zz`
-2. It auto-detects the Electron version from upstream metadata, falling back to a pinned constant
+2. It auto-detects the Electron version from upstream metadata, falling back to a pinned constant, then caps the build target if the upstream major is newer than the max buildable Linux native-module target
 3. It extracts and patches `app.asar` (Linux File Manager integration, tray, single-instance handoff, browser-annotation fixes, Computer Use platform gate, Linux opaque background, etc.) — every patch fail-soft, with regex-driven needles
 4. It rebuilds native Node modules (`better-sqlite3`, `node-pty`) for Linux via `@electron/rebuild`
 5. It downloads the matching Linux Electron runtime (cached under `~/.cache/codex-desktop/electron/`)

@@ -110,12 +110,42 @@ PY
 
     local resources_dir="$app_dir/Contents/Resources"
     if [ -f "$resources_dir/app.asar" ]; then
-        detected=$(npx --yes asar extract-file "$resources_dir/app.asar" package.json 2>/dev/null |
-            node -e '
-const fs = require("node:fs");
-const pkg = JSON.parse(fs.readFileSync(0, "utf8"));
-process.stdout.write(String(pkg.devDependencies?.electron ?? pkg.dependencies?.electron ?? ""));
-' 2>/dev/null || true)
+        # Read package.json directly out of the asar archive with Python. The
+        # asar header is a pickled JSON blob (uint32 length-prefixed) followed by
+        # the concatenated file contents, so we can locate package.json without
+        # depending on `npx asar`, which can be unavailable or choke on the
+        # symlink-bearing DMG extraction. `devDependencies.electron` is the
+        # authoritative Electron version (upstream renamed the bundled framework
+        # from "Electron Framework" to "Codex Framework", and its plist now
+        # carries the Chromium version rather than the Electron version).
+        detected=$(python3 - "$resources_dir/app.asar" <<'PY' 2>/dev/null || true
+import json
+import struct
+import sys
+
+try:
+    with open(sys.argv[1], "rb") as handle:
+        header = handle.read(16)
+        if len(header) < 16:
+            raise SystemExit(0)
+        header_size = struct.unpack("<4I", header)[3]
+        header_json = handle.read(header_size).decode("utf-8", "ignore")
+        tree = json.loads(header_json)
+        entry = tree.get("files", {}).get("package.json")
+        if not entry or "offset" not in entry or "size" not in entry:
+            raise SystemExit(0)
+        content_start = 16 + header_size
+        if content_start % 4:
+            content_start += 4 - (content_start % 4)
+        handle.seek(content_start + int(entry["offset"]))
+        pkg = json.loads(handle.read(int(entry["size"])).decode("utf-8", "ignore"))
+        electron = (pkg.get("devDependencies") or {}).get("electron") \
+            or (pkg.get("dependencies") or {}).get("electron") or ""
+        print(electron)
+except Exception:
+    raise SystemExit(0)
+PY
+)
         if detected_version=$(sanitize_electron_version "$detected"); then
             ELECTRON_VERSION="$detected_version"
             info "Detected Electron version from package.json: $ELECTRON_VERSION"
@@ -129,3 +159,54 @@ process.stdout.write(String(pkg.devDependencies?.electron ?? pkg.dependencies?.e
     return 0
 }
 
+electron_version_major() {
+    local version="$1"
+    local major="${version%%.*}"
+
+    case "$major" in
+        ''|*[!0-9]*) return 1 ;;
+    esac
+
+    echo "$major"
+}
+
+validate_electron_cap_config() {
+    case "$MAX_SUPPORTED_ELECTRON_MAJOR" in
+        ''|*[!0-9]*) error "Invalid CODEX_MAX_ELECTRON_MAJOR: $MAX_SUPPORTED_ELECTRON_MAJOR" ;;
+    esac
+
+    local cap_version_major
+    if ! sanitize_electron_version "$MAX_SUPPORTED_ELECTRON_VERSION" >/dev/null; then
+        error "Invalid CODEX_MAX_ELECTRON_VERSION: $MAX_SUPPORTED_ELECTRON_VERSION"
+    fi
+    cap_version_major="$(electron_version_major "$MAX_SUPPORTED_ELECTRON_VERSION")"
+
+    if [ "$cap_version_major" -gt "$MAX_SUPPORTED_ELECTRON_MAJOR" ]; then
+        error "CODEX_MAX_ELECTRON_VERSION major ($cap_version_major) exceeds CODEX_MAX_ELECTRON_MAJOR ($MAX_SUPPORTED_ELECTRON_MAJOR)"
+    fi
+}
+
+# Cap ELECTRON_VERSION to the newest buildable Electron when upstream ships a
+# major we cannot build native modules for yet. Detection remains raw; this
+# helper records the upstream-declared version separately for reporting.
+cap_electron_version() {
+    CODEX_UPSTREAM_ELECTRON_VERSION="$ELECTRON_VERSION"
+    validate_electron_cap_config
+
+    if [ -n "${CODEX_FORCE_ELECTRON_VERSION:-}" ]; then
+        if ! ELECTRON_VERSION="$(sanitize_electron_version "$CODEX_FORCE_ELECTRON_VERSION")"; then
+            error "Invalid CODEX_FORCE_ELECTRON_VERSION: $CODEX_FORCE_ELECTRON_VERSION"
+        fi
+        warn "Forcing Electron v$ELECTRON_VERSION (CODEX_FORCE_ELECTRON_VERSION)"
+        return 0
+    fi
+
+    local detected_major
+    detected_major="$(electron_version_major "$ELECTRON_VERSION")" || return 0
+
+    if [ "$detected_major" -gt "$MAX_SUPPORTED_ELECTRON_MAJOR" ]; then
+        warn "Electron v$ELECTRON_VERSION (major $detected_major) exceeds the max buildable major $MAX_SUPPORTED_ELECTRON_MAJOR; native modules (better-sqlite3) cannot build against it yet."
+        warn "Capping build to Electron v$MAX_SUPPORTED_ELECTRON_VERSION (upstream declares v$CODEX_UPSTREAM_ELECTRON_VERSION)."
+        ELECTRON_VERSION="$MAX_SUPPORTED_ELECTRON_VERSION"
+    fi
+}

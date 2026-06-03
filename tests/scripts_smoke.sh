@@ -52,6 +52,21 @@ assert_occurrence_count() {
     [ "$actual" = "$expected" ] || fail "Expected '$pattern' to appear $expected times in $path, found $actual"
 }
 
+assert_json_field_equals() {
+    local path="$1"
+    local field="$2"
+    local expected="$3"
+    node - "$path" "$field" "$expected" <<'NODE' || fail "Expected JSON field $field to equal $expected in $path"
+const fs = require("node:fs");
+const [path, field, expected] = process.argv.slice(2);
+const value = JSON.parse(fs.readFileSync(path, "utf8"))[field];
+if (value !== expected) {
+  console.error(field + ": expected " + expected + ", got " + value);
+  process.exit(1);
+}
+NODE
+}
+
 make_fake_browser_use_upstream_app() {
     local app_dir="$1"
     local resources_dir="$app_dir/Contents/Resources"
@@ -402,6 +417,118 @@ PLIST
     [ "$(tail -n 1 "$output_log")" = "41.3.0" ] || fail "Expected fallback Electron version 41.3.0, got: $(cat "$output_log")"
 }
 
+test_installer_caps_too_new_electron_version() {
+    info "Checking Electron version cap for too-new upstream metadata"
+    local workspace="$TMP_DIR/electron-version-cap"
+    local output_log="$workspace/output.log"
+
+    mkdir -p "$workspace"
+    CODEX_INSTALLER_SOURCE_ONLY=1 bash -c \
+        'source "$1"; ELECTRON_VERSION=42.1.0; cap_electron_version; printf "%s|%s\n" "$ELECTRON_VERSION" "$CODEX_UPSTREAM_ELECTRON_VERSION"' \
+        _ "$REPO_DIR/install.sh" >"$output_log" 2>&1
+
+    assert_contains "$output_log" "exceeds the max buildable major 41"
+    assert_contains "$output_log" "Capping build to Electron v41.7.1"
+    [ "$(tail -n 1 "$output_log")" = "41.7.1|42.1.0" ] || fail "Expected capped Electron version and upstream trace, got: $(cat "$output_log")"
+}
+
+test_installer_leaves_supported_electron_versions() {
+    info "Checking supported Electron versions pass through uncapped"
+    local workspace="$TMP_DIR/electron-version-supported"
+    local output_log="$workspace/output.log"
+
+    mkdir -p "$workspace"
+    CODEX_INSTALLER_SOURCE_ONLY=1 bash -c \
+        'source "$1"; ELECTRON_VERSION=41.3.0; cap_electron_version; printf "%s|%s\n" "$ELECTRON_VERSION" "$CODEX_UPSTREAM_ELECTRON_VERSION"; ELECTRON_VERSION=40.7.0; cap_electron_version; printf "%s|%s\n" "$ELECTRON_VERSION" "$CODEX_UPSTREAM_ELECTRON_VERSION"' \
+        _ "$REPO_DIR/install.sh" >"$output_log" 2>&1
+
+    [ "$(tail -n 2 "$output_log" | sed -n '1p')" = "41.3.0|41.3.0" ] || fail "Expected Electron 41.3.0 to pass through, got: $(cat "$output_log")"
+    [ "$(tail -n 1 "$output_log")" = "40.7.0|40.7.0" ] || fail "Expected Electron 40.7.0 to pass through, got: $(cat "$output_log")"
+}
+
+test_installer_honors_forced_electron_version() {
+    info "Checking forced Electron version override"
+    local workspace="$TMP_DIR/electron-version-force"
+    local output_log="$workspace/output.log"
+
+    mkdir -p "$workspace"
+    CODEX_FORCE_ELECTRON_VERSION=40.2.0 CODEX_INSTALLER_SOURCE_ONLY=1 bash -c \
+        'source "$1"; ELECTRON_VERSION=42.1.0; cap_electron_version; printf "%s|%s\n" "$ELECTRON_VERSION" "$CODEX_UPSTREAM_ELECTRON_VERSION"' \
+        _ "$REPO_DIR/install.sh" >"$output_log" 2>&1
+
+    assert_contains "$output_log" "Forcing Electron v40.2.0"
+    [ "$(tail -n 1 "$output_log")" = "40.2.0|42.1.0" ] || fail "Expected forced Electron version, got: $(cat "$output_log")"
+}
+
+test_installer_rejects_invalid_electron_cap_overrides() {
+    info "Checking invalid Electron cap override failures"
+    local workspace="$TMP_DIR/electron-version-invalid"
+
+    mkdir -p "$workspace"
+    if CODEX_FORCE_ELECTRON_VERSION=forty CODEX_INSTALLER_SOURCE_ONLY=1 bash -c \
+        'source "$1"; ELECTRON_VERSION=42.1.0; cap_electron_version' \
+        _ "$REPO_DIR/install.sh" >"$workspace/force.log" 2>&1; then
+        fail "Expected invalid CODEX_FORCE_ELECTRON_VERSION to fail"
+    fi
+    assert_contains "$workspace/force.log" "Invalid CODEX_FORCE_ELECTRON_VERSION: forty"
+
+    if CODEX_MAX_ELECTRON_MAJOR=forty-one CODEX_INSTALLER_SOURCE_ONLY=1 bash -c \
+        'source "$1"; ELECTRON_VERSION=42.1.0; cap_electron_version' \
+        _ "$REPO_DIR/install.sh" >"$workspace/major.log" 2>&1; then
+        fail "Expected invalid CODEX_MAX_ELECTRON_MAJOR to fail"
+    fi
+    assert_contains "$workspace/major.log" "Invalid CODEX_MAX_ELECTRON_MAJOR: forty-one"
+
+    if CODEX_MAX_ELECTRON_VERSION=latest CODEX_INSTALLER_SOURCE_ONLY=1 bash -c \
+        'source "$1"; ELECTRON_VERSION=42.1.0; cap_electron_version' \
+        _ "$REPO_DIR/install.sh" >"$workspace/version.log" 2>&1; then
+        fail "Expected invalid CODEX_MAX_ELECTRON_VERSION to fail"
+    fi
+    assert_contains "$workspace/version.log" "Invalid CODEX_MAX_ELECTRON_VERSION: latest"
+
+    if CODEX_MAX_ELECTRON_MAJOR=40 CODEX_INSTALLER_SOURCE_ONLY=1 bash -c \
+        'source "$1"; ELECTRON_VERSION=42.1.0; cap_electron_version' \
+        _ "$REPO_DIR/install.sh" >"$workspace/mismatch.log" 2>&1; then
+        fail "Expected cap version above cap major to fail"
+    fi
+    assert_contains "$workspace/mismatch.log" "CODEX_MAX_ELECTRON_VERSION major (41) exceeds CODEX_MAX_ELECTRON_MAJOR (40)"
+}
+
+test_installer_honors_electron_cap_overrides() {
+    info "Checking Electron cap override behavior"
+    local workspace="$TMP_DIR/electron-version-cap-overrides"
+    local output_log="$workspace/output.log"
+
+    mkdir -p "$workspace"
+    CODEX_MAX_ELECTRON_MAJOR=42 CODEX_INSTALLER_SOURCE_ONLY=1 bash -c \
+        'source "$1"; ELECTRON_VERSION=42.1.0; cap_electron_version; printf "%s|%s\n" "$ELECTRON_VERSION" "$CODEX_UPSTREAM_ELECTRON_VERSION"' \
+        _ "$REPO_DIR/install.sh" >"$output_log" 2>&1
+    [ "$(tail -n 1 "$output_log")" = "42.1.0|42.1.0" ] || fail "Expected raised cap to pass through, got: $(cat "$output_log")"
+
+    CODEX_MAX_ELECTRON_MAJOR=40 CODEX_MAX_ELECTRON_VERSION=40.7.0 CODEX_INSTALLER_SOURCE_ONLY=1 bash -c \
+        'source "$1"; ELECTRON_VERSION=41.3.0; cap_electron_version; printf "%s|%s\n" "$ELECTRON_VERSION" "$CODEX_UPSTREAM_ELECTRON_VERSION"' \
+        _ "$REPO_DIR/install.sh" >"$output_log" 2>&1
+    assert_contains "$output_log" "Capping build to Electron v40.7.0"
+    [ "$(tail -n 1 "$output_log")" = "40.7.0|41.3.0" ] || fail "Expected lowered cap target to apply, got: $(cat "$output_log")"
+}
+
+test_rebuild_report_records_upstream_electron_version() {
+    info "Checking rebuild report records build and upstream Electron versions"
+    local workspace="$TMP_DIR/rebuild-report-electron"
+    local patch_report="$workspace/patch-report.json"
+    local rebuild_report="$workspace/rebuild-report.json"
+
+    mkdir -p "$workspace"
+    printf '{"patches":[]}\n' > "$patch_report"
+
+    CODEX_INSTALLER_SOURCE_ONLY=1 bash -c \
+        'source "$1"; write_rebuild_report_json "$2" "$3" 41.7.1 "$4" "$5" 42.1.0' \
+        _ "$REPO_DIR/install.sh" "$rebuild_report" "$workspace/Codex.dmg" "$patch_report" "$workspace/app" >"$workspace/output.log" 2>&1
+
+    assert_json_field_equals "$rebuild_report" "electronVersion" "41.7.1"
+    assert_json_field_equals "$rebuild_report" "upstreamElectronVersion" "42.1.0"
+}
+
 test_managed_node_runtime_source_install() {
     info "Checking managed Node.js runtime source install"
     local workspace="$TMP_DIR/managed-node-runtime"
@@ -450,6 +577,8 @@ test_launcher_template_sanity() {
     assert_contains "$REPO_DIR/scripts/lib/asar-patch.sh" "CODEX_PATCH_REPORT_JSON"
     assert_contains "$REPO_DIR/scripts/lib/rebuild-report.sh" "write_rebuild_report_json"
     assert_contains "$REPO_DIR/install.sh" "MIN_BETTER_SQLITE3_VERSION_FOR_ELECTRON_41=\"12.9.0\""
+    assert_contains "$REPO_DIR/install.sh" "MAX_SUPPORTED_ELECTRON_MAJOR"
+    assert_contains "$REPO_DIR/install.sh" "MAX_SUPPORTED_ELECTRON_VERSION"
     assert_contains "$REPO_DIR/scripts/lib/native-modules.sh" "better_sqlite3_build_version"
     assert_contains "$REPO_DIR/scripts/lib/native-modules.sh" "prune_native_module_build_artifacts"
     assert_contains "$REPO_DIR/scripts/lib/native-modules.sh" 'find "$build_dir" -type f ! -name'
@@ -502,6 +631,12 @@ if 'pid_matches_executable "$RUNNING_APP_PID" "$SCRIPT_DIR/electron"' not in lau
     raise SystemExit("launch_electron must not overwrite APP_PID_FILE for second-instance handoff")
 if 'echo "$ELECTRON_PID" > "$APP_PID_FILE"' not in launch_body:
     raise SystemExit("launch_electron must still write APP_PID_FILE for normal cold launches")
+if 'cd "$LAUNCH_CWD"' not in launch_body:
+    raise SystemExit("launch_electron must restore the caller cwd before starting Electron")
+if 'if ! cd "$LAUNCH_CWD"; then' not in launch_body or 'cd "$SCRIPT_DIR"' not in launch_body:
+    raise SystemExit("launch_electron may only fall back to the app dir when the caller cwd is unavailable")
+if 'Using launch cwd=$LAUNCH_CWD' not in runtime_body:
+    raise SystemExit("launcher must log the cwd passed through to Electron")
 if "using_second_instance_handoff" not in source or "needs_cold_start" not in source:
     raise SystemExit("launcher must have an explicit second-instance handoff mode")
 if "second_instance_handoff_ready" not in runtime_body:
@@ -530,6 +665,8 @@ if "running_app_is_active" not in adopt_body:
     raise SystemExit("adopt_existing_webview_server must detect live-app reuse before cleanup")
 if "if adopt_existing_webview_server; then" not in ensure_body:
     raise SystemExit("ensure_webview_server must split adoption from origin verification")
+if 'cd "$WEBVIEW_DIR"\n        python3 "$SCRIPT_DIR/.codex-linux/webview-server.py"' not in ensure_body:
+    raise SystemExit("ensure_webview_server must run webview server from WEBVIEW_DIR")
 if "stop_stale_webview_server" not in ensure_body:
     raise SystemExit("ensure_webview_server must clear stale deleted webview servers before treating the port as foreign")
 if "Keeping the live app untouched" not in ensure_body:
@@ -2217,6 +2354,12 @@ main() {
     test_upstream_build_app_workflow_tracks_dmg_metadata
     test_installer_detects_electron_version_from_plist
     test_installer_keeps_electron_fallback_for_bad_metadata
+    test_installer_caps_too_new_electron_version
+    test_installer_leaves_supported_electron_versions
+    test_installer_honors_forced_electron_version
+    test_installer_rejects_invalid_electron_cap_overrides
+    test_installer_honors_electron_cap_overrides
+    test_rebuild_report_records_upstream_electron_version
     test_managed_node_runtime_source_install
     test_browser_use_node_repl_fallback_runtime
     test_chrome_plugin_staging

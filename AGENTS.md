@@ -191,6 +191,8 @@ This path is for users who do not want a system-wide native package; the daily-d
   `7z` can return a non-zero status for the `/Applications` symlink inside the DMG. This is currently treated as a warning if a `.app` bundle was still extracted successfully.
 - Managed Node.js runtime:
   `install.sh` always provisions a managed Linux Node.js runtime under `codex-app/resources/node-runtime/` (default `v22.22.2`). The launcher, native module rebuild, Browser Use, the Codex CLI install/update flow, and the local auto-update rebuilds all use this runtime. Override with `CODEX_MANAGED_NODE_VERSION` / `CODEX_MANAGED_NODE_URL` / `CODEX_MANAGED_NODE_SHA256` (the SHA must be set when overriding the version or URL).
+- Max buildable Electron cap:
+  `detect_electron_version` records the raw upstream-declared Electron version, then `cap_electron_version` caps `ELECTRON_VERSION` when the upstream major exceeds the newest Linux native-module target we can build. Current defaults are `MAX_SUPPORTED_ELECTRON_MAJOR=41` and `MAX_SUPPORTED_ELECTRON_VERSION=41.7.1` because `better-sqlite3` uses raw V8 APIs and does not build against Electron 42 / V8 13.x yet. `CODEX_UPSTREAM_ELECTRON_VERSION` is preserved in rebuild reports beside the capped build target. Operator escape hatches: `CODEX_MAX_ELECTRON_MAJOR`, `CODEX_MAX_ELECTRON_VERSION`, and exact-version `CODEX_FORCE_ELECTRON_VERSION`; invalid values fail before `npm install electron@...` or `@electron/rebuild`.
 - Launcher and `nvm`:
   GUI launchers often do not inherit the user's shell `PATH`. The generated `start.sh` explicitly searches for `codex`, including common `nvm` locations.
 - CLI preflight:

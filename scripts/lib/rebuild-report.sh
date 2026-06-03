@@ -20,13 +20,14 @@ write_rebuild_report_json() {
     local electron_version="$3"
     local patch_report_path="$4"
     local app_dir="${5:-}"
+    local upstream_electron_version="${6:-$electron_version}"
 
     mkdir -p "$(dirname "$output_path")"
-    node - "$output_path" "$dmg_path" "$electron_version" "$patch_report_path" "$app_dir" <<'NODE'
+    node - "$output_path" "$dmg_path" "$electron_version" "$patch_report_path" "$app_dir" "$upstream_electron_version" <<'NODE'
 const fs = require("node:fs");
 const path = require("node:path");
 
-const [outputPath, dmgPath, electronVersion, patchReportPath, appDir] = process.argv.slice(2);
+const [outputPath, dmgPath, electronVersion, patchReportPath, appDir, upstreamElectronVersion] = process.argv.slice(2);
 const patchReport = fs.existsSync(patchReportPath)
   ? JSON.parse(fs.readFileSync(patchReportPath, "utf8"))
   : { patches: [] };
@@ -35,6 +36,7 @@ const report = {
   generatedAt: new Date().toISOString(),
   dmgPath,
   electronVersion,
+  upstreamElectronVersion: upstreamElectronVersion || electronVersion,
   appDir: appDir || null,
   mainBundle: patchReport.mainBundle ?? null,
   iconAsset: patchReport.iconAsset ?? null,

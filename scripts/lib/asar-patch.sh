@@ -68,7 +68,7 @@ inspect_rebuild_candidate() {
     fi
 
     node "$SCRIPT_DIR/scripts/patch-linux-window-ui.js" --report-json "$patch_report" "$inspect_dir"
-    write_rebuild_report_json "$rebuild_report" "$dmg_path" "$ELECTRON_VERSION" "$patch_report" ""
+    write_rebuild_report_json "$rebuild_report" "$dmg_path" "$ELECTRON_VERSION" "$patch_report" "" "${CODEX_UPSTREAM_ELECTRON_VERSION:-$ELECTRON_VERSION}"
 
     info "Patch report: $patch_report"
     info "Rebuild report: $rebuild_report"

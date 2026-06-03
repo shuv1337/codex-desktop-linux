@@ -32,6 +32,7 @@ const {
   applyLinuxExplicitTrayQuitPatch,
   applyLinuxFileManagerPatch,
   applyLinuxGitOriginsSourceFallbackPatch,
+  applyLinuxIntegratedTerminalShellPatch,
   applyLinuxQuitGuardPatch,
   applyLinuxHotkeyWindowPrewarmPatch,
   applyLinuxLaunchActionArgsPatch,
@@ -546,6 +547,7 @@ test("default core patch descriptors are grouped and unique", () => {
     "linux-opaque-background",
     "linux-avatar-overlay-mouse-passthrough",
     "linux-file-manager",
+    "linux-integrated-terminal-shell",
     "linux-tray",
     "linux-build-info-tray",
     "linux-single-instance",
@@ -867,6 +869,16 @@ test("adds Linux file manager support without relying on exact minified variable
   assert.match(patched, /linux:\{label:`File Manager`/);
   assert.match(patched, /detect:\(\)=>`linux-file-manager`/);
   assert.match(patched, /n\.shell\.openPath\(__codexOpenTarget\)/);
+});
+
+test("prefers Linux integrated terminal shell overrides before upstream Unix fallback", () => {
+  const source = "function JT(e){if(process.platform!==`win32`)return[t.Gn()];if(e===`powershell`)return[`pwsh`];}";
+
+  const patched = applyPatchTwice(applyLinuxIntegratedTerminalShellPatch, source);
+
+  assert.match(patched, /CODEX_LINUX_INTEGRATED_TERMINAL_SHELL/);
+  assert.match(patched, /process\.env\.SHELL\?\.trim\(\)/);
+  assert.match(patched, /return\[e\|\|t\.Gn\(\)\]/);
 });
 
 test("preserves user-enabled remote_control config on Linux", () => {

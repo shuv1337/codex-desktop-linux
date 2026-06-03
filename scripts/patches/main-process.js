@@ -1034,6 +1034,29 @@ function applyLinuxRemoteControlConfigPreservationPatch(currentSource) {
   return currentSource;
 }
 
+function applyLinuxIntegratedTerminalShellPatch(currentSource) {
+  if (currentSource.includes("CODEX_LINUX_INTEGRATED_TERMINAL_SHELL")) {
+    return currentSource;
+  }
+
+  const defaultUnixShellRegex =
+    /function ([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*)\)\{if\(process\.platform!==`win32`\)return\[([A-Za-z_$][\w$]*)\.([A-Za-z_$][\w$]*)\(\)\];/;
+  const match = currentSource.match(defaultUnixShellRegex);
+  if (match == null) {
+    if (currentSource.includes("INTEGRATED_TERMINAL_SHELL")) {
+      console.warn(
+        "WARN: Could not find integrated terminal Unix shell resolver — skipping Linux terminal shell patch",
+      );
+    }
+    return currentSource;
+  }
+
+  const [needle, functionName, settingArg, shellModule, shellFunction] = match;
+  const replacement =
+    `function ${functionName}(${settingArg}){if(process.platform!==\`win32\`){let ${settingArg}=process.env.CODEX_LINUX_INTEGRATED_TERMINAL_SHELL?.trim()||process.env.SHELL?.trim();return[${settingArg}||${shellModule}.${shellFunction}()]}`;
+  return currentSource.replace(needle, replacement);
+}
+
 module.exports = {
   applyBrowserUseNodeReplApprovalPatch,
   applyLinuxChromeExtensionStatusPatch,
@@ -1043,6 +1066,7 @@ module.exports = {
   applyLinuxBuildInfoTrayPatch,
   applyLinuxFileManagerPatch,
   applyLinuxGitOriginsSourceFallbackPatch,
+  applyLinuxIntegratedTerminalShellPatch,
   applyLinuxMenuPatch,
   applyLinuxOpaqueBackgroundPatch,
   applyLinuxQuitGuardPatch,

@@ -1057,21 +1057,19 @@ wait_for_tcp_listener() {
     return 1
 }
 
-# Hard-fail policy:
-#   Codex Desktop must NEVER spawn its own bundled codex app-server
-#   process. The local codex app-server is owned exclusively by
-#   `alleycat.service` (see ~/repos/alleycat/AGENTS.md "Codex
-#   app-server lifecycle"). If alleycat is not installed, not running,
-#   or not exposing a reachable websocket bridge for Codex, abort the
-#   launch with a clear error so the user knows to fix alleycat
-#   instead of silently falling through to upstream's daemon spawn.
+# Alleycat transport policy (OPT-IN as of alleycat decommission):
+#   Alleycat has been decommissioned on this host, so Codex Desktop now
+#   uses its own built-in codex app-server by default. The alleycat
+#   websocket-bridge enforcement below is retained but gated behind an
+#   explicit opt-in so it can be re-enabled if alleycat ever comes back.
 #
-#   Escape hatch: `CODEX_DESKTOP_USE_ALLEYCAT=0` opts out entirely
-#   (Codex Desktop reverts to its built-in app-server startup path).
-#   Only set this for one-off debugging.
+#   Re-enable: set `CODEX_DESKTOP_USE_ALLEYCAT=1`. When enabled, Codex
+#   Desktop will refuse to spawn its own app-server and instead require a
+#   reachable alleycat Codex websocket bridge (see
+#   ~/repos/alleycat/AGENTS.md "Codex app-server lifecycle").
 configure_alleycat_app_server_transport() {
-    if [ "${CODEX_DESKTOP_USE_ALLEYCAT:-1}" = "0" ]; then
-        echo "CODEX_DESKTOP_USE_ALLEYCAT=0 — skipping alleycat enforcement; Codex Desktop will use its built-in app-server" >&2
+    if [ "${CODEX_DESKTOP_USE_ALLEYCAT:-0}" != "1" ]; then
+        echo "CODEX_DESKTOP_USE_ALLEYCAT is not 1 — using Codex Desktop's built-in app-server (alleycat decommissioned)" >&2
         return 0
     fi
     if [ -n "${CODEX_APP_SERVER_WS_URL:-}" ]; then

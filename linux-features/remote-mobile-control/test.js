@@ -196,8 +196,8 @@ function syntheticSettingsRefreshBundle() {
 
 function syntheticAppServerLaunchBundle() {
   return [
-    "function Pd(e){let t=e.hostConfig.codex_cli_command;if(t&&t.length>0){let[e,...n]=t;return!e||e.trim().length===0?null:{executablePath:e,args:n}}let n=Kd();if(n!=null)return{executablePath:n,args:[`app-server`,`--analytics-default-enabled`]};let r=Nd(e.repoRoot,{resourcesPath:e.resourcesPath});return r?{executablePath:r.executablePath,args:[`app-server`,`--analytics-default-enabled`],binDirectory:r.binDirectory}:null}",
-    "function Fd(e){let t=e.hostConfig.codex_cli_command;if(t&&t.length>0){let[e,...n]=t;if(!e||e.trim().length===0)return null;return{executablePath:e,args:n}}let n=Kd();if(n!=null)return{executablePath:n,args:[`app-server`,`--analytics-default-enabled`]};let r=Ud(e.repoRoot,{resourcesPath:e.resourcesPath,windowsCodexHome:e.windowsCodexHome});return r?{executablePath:r.executablePath,args:[`app-server`,`--analytics-default-enabled`],binDirectory:r.binDirectory}:null}",
+    "var I=`local`,ru={id:I,display_name:`Local`,kind:`local`};",
+    "function createAppServerConnection(e,i=ru){return new Client({beforeConnect:i.id===`local`?()=>yY({hostConfig:i}):void 0})}",
   ].join("");
 }
 
@@ -333,7 +333,6 @@ const COLD_START_TEST_ENV_KEYS = [
   "CODEX_REMOTE_CONTROL_CODEX_RELEASE",
   "CODEX_REMOTE_CONTROL_DAEMON_AUTOSTART_DISABLED",
   "CODEX_REMOTE_CONTROL_DAEMON_AUTOSTART_TIMEOUT_SECONDS",
-  "CODEX_REMOTE_CONTROL_FORCE_COLD_START_DAEMON",
   "CODEX_REMOTE_CONTROL_RUNTIME_AUTO_INSTALL_DISABLED",
 ];
 
@@ -370,10 +369,10 @@ function runStageHook(env) {
   });
 }
 
-function writeDesktopAppServerRemoteControlMarker(appDir) {
-  const marker = path.join(appDir, ".codex-linux", "desktop-app-server-remote-control-enabled");
+function writeDesktopAppServerDaemonProxyMarker(appDir) {
+  const marker = path.join(appDir, ".codex-linux", "desktop-app-server-daemon-proxy-enabled");
   fs.mkdirSync(path.dirname(marker), { recursive: true });
-  fs.writeFileSync(marker, "desktop-app-server-remote-control\n");
+  fs.writeFileSync(marker, "desktop-app-server-daemon-proxy\n");
 }
 
 test("remote mobile control feature stays disabled until listed in features.json", () => {
@@ -382,17 +381,17 @@ test("remote mobile control feature stays disabled until listed in features.json
   });
 });
 
-test("remote mobile stage hook writes installed Desktop app-server ownership marker from patched app layout", () => {
+test("remote mobile stage hook writes installed Desktop app-server daemon proxy marker from patched app layout", () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "codex-remote-mobile-stage-"));
   try {
     const installDir = path.join(tempRoot, "package", "opt", "codex-desktop");
     const workDir = path.join(tempRoot, "work");
     const buildDir = path.join(workDir, "app-extracted", ".vite", "build");
-    const marker = path.join(installDir, ".codex-linux", "desktop-app-server-remote-control-enabled");
+    const marker = path.join(installDir, ".codex-linux", "desktop-app-server-daemon-proxy-enabled");
     const coldStartHook = path.join(installDir, ".codex-linux", "cold-start.d", "remote-mobile-control");
 
     fs.mkdirSync(buildDir, { recursive: true });
-    fs.writeFileSync(path.join(buildDir, "main.js"), "globalThis.codexLinuxRemoteMobileAppServerArgs=true;");
+    fs.writeFileSync(path.join(buildDir, "main.js"), "globalThis.codexLinuxRemoteMobileAppServerProxyCommand=true;");
 
     const result = runStageHook({
       ARCH: "x64",
@@ -403,20 +402,20 @@ test("remote mobile stage hook writes installed Desktop app-server ownership mar
     });
 
     assert.equal(result.status, 0, result.stderr || result.stdout);
-    assert.equal(fs.readFileSync(marker, "utf8"), "desktop-app-server-remote-control\n");
+    assert.equal(fs.readFileSync(marker, "utf8"), "desktop-app-server-daemon-proxy\n");
     assert.equal(fs.existsSync(coldStartHook), true);
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true });
   }
 });
 
-test("remote mobile stage hook leaves Desktop ownership marker absent when patch marker is missing", () => {
+test("remote mobile stage hook leaves Desktop daemon proxy marker absent when patch marker is missing", () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "codex-remote-mobile-stage-"));
   try {
     const installDir = path.join(tempRoot, "package", "opt", "codex-desktop");
     const workDir = path.join(tempRoot, "work");
     const buildDir = path.join(workDir, "app-extracted", ".vite", "build");
-    const marker = path.join(installDir, ".codex-linux", "desktop-app-server-remote-control-enabled");
+    const marker = path.join(installDir, ".codex-linux", "desktop-app-server-daemon-proxy-enabled");
 
     fs.mkdirSync(buildDir, { recursive: true });
     fs.writeFileSync(path.join(buildDir, "main.js"), "globalThis.someOtherPatch=true;");
@@ -431,7 +430,7 @@ test("remote mobile stage hook leaves Desktop ownership marker absent when patch
 
     assert.equal(result.status, 0, result.stderr || result.stdout);
     assert.equal(fs.existsSync(marker), false);
-    assert.match(result.stderr, /Desktop app-server remote-control marker not found/);
+    assert.match(result.stderr, /Desktop app-server daemon proxy marker not found/);
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true });
   }
@@ -492,7 +491,7 @@ test("remote mobile cold-start hook preserves user codex symlinks outside the st
   }
 });
 
-test("remote mobile cold-start hook skips daemon when Desktop app-server owns remote-control", () => {
+test("remote mobile cold-start hook starts the managed daemon even when Desktop uses the daemon proxy", () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "codex-remote-mobile-cold-start-"));
   try {
     const home = path.join(tempRoot, "home");
@@ -504,7 +503,7 @@ test("remote mobile cold-start hook skips daemon when Desktop app-server owns re
     fs.mkdirSync(path.dirname(standaloneCodex), { recursive: true });
     fs.mkdirSync(home, { recursive: true });
     fs.mkdirSync(appDir, { recursive: true });
-    writeDesktopAppServerRemoteControlMarker(appDir);
+    writeDesktopAppServerDaemonProxyMarker(appDir);
     fs.writeFileSync(
       standaloneCodex,
       `#!/usr/bin/env sh\nprintf '%s\\n' "$*" >> ${JSON.stringify(callsLog)}\nexit 0\n`,
@@ -519,25 +518,22 @@ test("remote mobile cold-start hook skips daemon when Desktop app-server owns re
     });
 
     assert.equal(result.status, 0, result.stderr || result.stdout);
-    assert.equal(fs.existsSync(callsLog), false);
-    assert.match(result.stdout, /Desktop app-server launches with remote-control enabled/);
+    assert.equal(fs.readFileSync(callsLog, "utf8"), "remote-control start\n");
+    assert.match(result.stdout, /Remote mobile control daemon is ready/);
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true });
   }
 });
 
-test("remote mobile cold-start hook removes dead standalone daemon pid files when Desktop app-server owns remote-control", () => {
+test("remote mobile cold-start hook removes dead standalone daemon pid files before daemon start", () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "codex-remote-mobile-cold-start-"));
   try {
     const home = path.join(tempRoot, "home");
     const codexHome = path.join(tempRoot, "codex-home");
     const daemonDir = path.join(codexHome, "app-server-daemon");
-    const appDir = path.join(tempRoot, "package", "share", "codex-desktop", "app");
 
     fs.mkdirSync(home, { recursive: true });
     fs.mkdirSync(daemonDir, { recursive: true });
-    fs.mkdirSync(appDir, { recursive: true });
-    writeDesktopAppServerRemoteControlMarker(appDir);
     fs.writeFileSync(
       path.join(daemonDir, "app-server.pid"),
       JSON.stringify({ pid: 999999, processStartTime: "fixture" }),
@@ -549,7 +545,7 @@ test("remote mobile cold-start hook removes dead standalone daemon pid files whe
 
     const result = runColdStartHook({
       CODEX_HOME: codexHome,
-      CODEX_LINUX_APP_DIR: appDir,
+      CODEX_REMOTE_CONTROL_RUNTIME_AUTO_INSTALL_DISABLED: "1",
       HOME: home,
     });
 
@@ -557,37 +553,32 @@ test("remote mobile cold-start hook removes dead standalone daemon pid files whe
     assert.equal(fs.existsSync(path.join(daemonDir, "app-server.pid")), false);
     assert.equal(fs.existsSync(path.join(daemonDir, "app-server-updater.pid")), false);
     assert.match(result.stdout, /Removed stale remote mobile control daemon pid file/);
-    assert.match(result.stdout, /Desktop app-server launches with remote-control enabled/);
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true });
   }
 });
 
-test("remote mobile cold-start hook preserves live standalone daemon pid files when Desktop app-server owns remote-control", () => {
+test("remote mobile cold-start hook preserves live standalone daemon pid files", () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "codex-remote-mobile-cold-start-"));
   try {
     const home = path.join(tempRoot, "home");
     const codexHome = path.join(tempRoot, "codex-home");
     const daemonDir = path.join(codexHome, "app-server-daemon");
-    const appDir = path.join(tempRoot, "package", "share", "codex-desktop", "app");
     const pidFile = path.join(daemonDir, "app-server.pid");
 
     fs.mkdirSync(home, { recursive: true });
     fs.mkdirSync(daemonDir, { recursive: true });
-    fs.mkdirSync(appDir, { recursive: true });
-    writeDesktopAppServerRemoteControlMarker(appDir);
     fs.writeFileSync(pidFile, JSON.stringify({ pid: process.pid, processStartTime: "fixture" }));
 
     const result = runColdStartHook({
       CODEX_HOME: codexHome,
-      CODEX_LINUX_APP_DIR: appDir,
+      CODEX_REMOTE_CONTROL_RUNTIME_AUTO_INSTALL_DISABLED: "1",
       HOME: home,
     });
 
     assert.equal(result.status, 0, result.stderr || result.stdout);
     assert.equal(fs.existsSync(pidFile), true);
     assert.doesNotMatch(result.stdout, /Removed stale remote mobile control daemon pid file/);
-    assert.match(result.stdout, /Desktop app-server launches with remote-control enabled/);
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true });
   }
@@ -757,18 +748,17 @@ test("Linux remote-control client recovery handles bare missing key material err
   assert.match(patched, /e\.message===`Remote-control client key material missing`/);
 });
 
-test("Linux remote mobile app-server launch enables remote control on the Desktop app-server", () => {
+test("Linux remote mobile app-server launch uses the managed daemon proxy", () => {
   const source = syntheticAppServerLaunchBundle();
   const patched = applyLinuxRemoteMobileAppServerRemoteControlPatch(source);
 
   assert.notEqual(patched, source);
-  assert.match(patched, /codexLinuxRemoteMobileAppServerArgs/);
-  assert.match(
-    patched,
-    /process\.platform===`linux`\?\[`app-server`,`--remote-control`,`--analytics-default-enabled`\]:\[`app-server`,`--analytics-default-enabled`\]/,
-  );
-  assert.doesNotMatch(patched, /args:\[`app-server`,`--analytics-default-enabled`\]/);
-  assert.match(patched, /args:codexLinuxRemoteMobileAppServerArgs\(\)/);
+  assert.match(patched, /codexLinuxRemoteMobileAppServerProxyCommand/);
+  assert.match(patched, /codex_cli_command:codexLinuxRemoteMobileAppServerProxyCommand\(\)/);
+  assert.match(patched, /`app-server`,`proxy`/);
+  assert.match(patched, /CODEX_REMOTE_CONTROL_DAEMON_AUTOSTART_DISABLED/);
+  assert.match(patched, /codexLinuxRemoteMobileBeforeConnect\(\(\)=>yY\(\{hostConfig:i\}\)\)/);
+  assert.doesNotMatch(patched, /`--remote-control`/);
   assert.equal(applyLinuxRemoteMobileAppServerRemoteControlPatch(patched), patched);
 });
 
@@ -1663,8 +1653,9 @@ test("remote mobile control feature participates in ASAR patching and reports", 
         );
         assert.match(patchedFile, /codexLinuxRemoteControlDeviceKeyClient/);
         assert.match(patchedFile, /n\.kind===`local`&&process\.platform!==`linux`/);
-        assert.match(patchedAppServerLaunchFile, /codexLinuxRemoteMobileAppServerArgs/);
-        assert.match(patchedAppServerLaunchFile, /`--remote-control`/);
+        assert.match(patchedAppServerLaunchFile, /codexLinuxRemoteMobileAppServerProxyCommand/);
+        assert.match(patchedAppServerLaunchFile, /codex_cli_command:codexLinuxRemoteMobileAppServerProxyCommand\(\)/);
+        assert.match(patchedAppServerLaunchFile, /`app-server`,`proxy`/);
         assert.match(patchedRemoteConnectionVisibilityFile, /codexLinuxRemoteControlLoadGateEnabled/);
         assert.match(patchedAppMainFile, /\.remote_control=!0/);
         assert.match(patchedVisibilityFile, /navigator\.userAgent\.includes\(`Linux`\)/);

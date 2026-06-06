@@ -108,19 +108,6 @@ cleanup_stale_remote_mobile_daemon_state() {
     done
 }
 
-desktop_app_server_remote_control_enabled() {
-    local app_dir="${CODEX_LINUX_APP_DIR:-}"
-    local marker=""
-
-    if truthy_env_value "${CODEX_REMOTE_CONTROL_FORCE_COLD_START_DAEMON:-}"; then
-        return 1
-    fi
-
-    [ -n "$app_dir" ] || return 1
-    marker="$app_dir/.codex-linux/desktop-app-server-remote-control-enabled"
-    [ -f "$marker" ]
-}
-
 remote_mobile_control_main() {
     local codex_home="${CODEX_HOME:-$HOME/.codex}"
 
@@ -135,11 +122,8 @@ remote_mobile_control_main() {
         echo "Remote mobile control daemon autostart skipped; codex-remote-control.service is already active"
         return 0
     fi
-    if desktop_app_server_remote_control_enabled; then
-        cleanup_stale_remote_mobile_daemon_state "$codex_home"
-        echo "Remote mobile control daemon autostart skipped; Desktop app-server launches with remote-control enabled"
-        return 0
-    fi
+
+    cleanup_stale_remote_mobile_daemon_state "$codex_home"
 
     local standalone_codex="${CODEX_REMOTE_CONTROL_CODEX_PATH:-$codex_home/packages/standalone/current/codex}"
 

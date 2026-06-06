@@ -48,19 +48,24 @@ What it changes:
 - Preserves `remote_control = true` / `features.remote_control = true` in the
   local Codex config instead of letting upstream strip it before app-server
   startup.
+- Configures the Linux Desktop local app-server connection to use the Codex
+  managed daemon path: before connecting it runs `codex remote-control start`,
+  then talks to the daemon through `codex app-server proxy`. If a daemon is
+  already running, Codex reuses it; if none is running, Codex starts one.
 - Updates remote-control settings and Codex mobile setup copy so the Linux flow
   is not described as Mac-only.
 - Stages `.codex-linux/cold-start.d/remote-mobile-control`, a feature-owned
   cold-start hook that provisions the upstream managed standalone daemon runtime
-  when it is missing, then starts the managed app-server daemon with
-  `remote-control start`.
+  when it is missing, then also calls `remote-control start`. This is
+  intentionally the same idempotent Codex daemon path that Desktop uses.
 
 Remote mobile daemon requirement:
 
-The interactive Codex CLI and the remote-control daemon are separate concerns.
-You can keep using a Homebrew-installed `codex` for normal terminal and Desktop
-app-server usage, but Android remote control currently expects the upstream
-managed standalone daemon runtime at:
+The interactive Codex CLI and the remote-control daemon can still be separate
+binaries, but they now converge on one managed app-server daemon/socket. You can
+keep using a Homebrew-installed `codex` for normal terminal and Desktop proxy
+usage, while the cold-start hook can provision the upstream managed standalone
+runtime at:
 
 ```bash
 ~/.codex/packages/standalone/current/codex
@@ -99,9 +104,10 @@ On NixOS, prefer the flake's Home Manager module instead of the launcher hook:
 
 The module installs the remote-mobile package variant and manages
 `codex-remote-control.service` as a user systemd unit running
-`codex app-server --remote-control --listen unix://`. It also sets
-`CODEX_REMOTE_CONTROL_DAEMON_AUTOSTART_DISABLED=1` so the launcher does not
-start a second mutable standalone daemon.
+`codex app-server --remote-control --listen unix://`. Desktop still reaches that
+daemon through `codex app-server proxy`, and feature-owned daemon autostart is
+disabled with `CODEX_REMOTE_CONTROL_DAEMON_AUTOSTART_DISABLED=1` so Nix remains
+the daemon owner.
 
 This is compatible with immutable Linux systems such as Bluefin / Universal
 Blue because the managed daemon runtime is user-scoped state under

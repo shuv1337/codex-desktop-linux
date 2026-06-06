@@ -47,8 +47,15 @@ const REMOTE_CONTROL_SELF_AUTO_CONNECT_MARKER = "codexLinuxRemoteControlSelfAuto
 const REMOTE_MOBILE_ACTIVE_STATUS_MARKER = "codexLinuxRemoteMobileActiveStatus";
 const REMOTE_CONTROL_STATUS_READ_GUARD_MARKER = "codexLinuxRemoteControlShouldReadStatus";
 const REMOTE_CONTROL_REVOKE_SETUP_RESET_MARKER = "codexLinuxRemoteControlResetMobileSetupAfterRevoke";
-const REMOTE_MOBILE_APP_SERVER_REMOTE_CONTROL_MARKER = "codexLinuxRemoteMobileAppServerArgs";
-const REMOTE_MOBILE_APP_SERVER_ARGS_NEEDLE = "args:[`app-server`,`--analytics-default-enabled`]";
+const REMOTE_MOBILE_APP_SERVER_REMOTE_CONTROL_MARKER = "codexLinuxRemoteMobileAppServerProxyCommand";
+const REMOTE_MOBILE_LOCAL_HOST_CONFIG_NEEDLE =
+  "var I=`local`,ru={id:I,display_name:`Local`,kind:`local`}";
+const REMOTE_MOBILE_LOCAL_HOST_CONFIG_REPLACEMENT =
+  "var I=`local`,ru={id:I,display_name:`Local`,kind:`local`,codex_cli_command:codexLinuxRemoteMobileAppServerProxyCommand()}";
+const REMOTE_MOBILE_BEFORE_CONNECT_NEEDLE =
+  /beforeConnect:([A-Za-z_$][\w$]*)\.id===`local`\?\(\)=>((?:[A-Za-z_$][\w$]*)\(\{hostConfig:\1\}\)):void 0/u;
+const REMOTE_MOBILE_APP_SERVER_DAEMON_HELPER =
+  "function codexLinuxRemoteMobileCodexCommand(){return process.env.CODEX_REMOTE_CONTROL_CODEX_PATH||process.env.CODEX_CLI_PATH||`codex`}function codexLinuxRemoteMobileAppServerProxyCommand(){return process.platform===`linux`?[codexLinuxRemoteMobileCodexCommand(),`app-server`,`proxy`]:[]}function codexLinuxRemoteMobileStartDaemon(){return new Promise(e=>{if(process.platform!==`linux`||process.env.CODEX_REMOTE_CONTROL_DAEMON_AUTOSTART_DISABLED===`1`||process.env.CODEX_REMOTE_CONTROL_DESKTOP_DAEMON_START_DISABLED===`1`){e();return}let t=Number(process.env.CODEX_REMOTE_CONTROL_DAEMON_AUTOSTART_TIMEOUT_SECONDS??30),r=Number.isFinite(t)&&t>0?t*1e3:3e4,i=codexLinuxRemoteMobileCodexCommand(),a=m.spawn(i,[`remote-control`,`start`],{env:n.Pr(process.env),stdio:[`ignore`,`ignore`,`pipe`]});let o=``,s=setTimeout(()=>{try{a.kill()}catch{}console.warn(`WARN: Linux remote mobile app-server daemon start timed out`);e()},r);s.unref?.(),a.stderr?.on(`data`,e=>{o=(o+e.toString(`utf8`)).slice(-4e3)}),a.on(`error`,t=>{clearTimeout(s),console.warn(`WARN: Linux remote mobile app-server daemon start failed: `+(t instanceof Error?t.message:String(t))),e()}),a.on(`close`,t=>{clearTimeout(s),t!==0&&console.warn(`WARN: Linux remote mobile app-server daemon start exited with code `+t+`: `+o.trim()),e()})})}async function codexLinuxRemoteMobileBeforeConnect(e){await e?.(),await codexLinuxRemoteMobileStartDaemon()}";
 const REMOTE_MOBILE_PROJECTLESS_REMOTE_TASK_MARKER = "codexLinuxRemoteMobileProjectlessRemoteTaskId";
 const REMOTE_CONTROL_SELECTED_TAB_NEEDLE =
   "function rr({selectedConnectionsTab:e,showControlThisMacTab:t,showRemoteControlConnectionsSection:n,showTabbedSshPage:r}){return n?e===`control-this-mac`&&!t||e===`ssh`&&!r?`access-other-devices`:e:`ssh`}";
@@ -455,13 +462,17 @@ function applyLinuxRemoteMobileAppServerRemoteControlPatch(source) {
   if (source.includes(REMOTE_MOBILE_APP_SERVER_REMOTE_CONTROL_MARKER)) {
     return source;
   }
-  if (!source.includes(REMOTE_MOBILE_APP_SERVER_ARGS_NEEDLE)) {
+  if (!source.includes(REMOTE_MOBILE_LOCAL_HOST_CONFIG_NEEDLE)) {
+    return source;
+  }
+  if (!REMOTE_MOBILE_BEFORE_CONNECT_NEEDLE.test(source)) {
+    console.warn("WARN: Could not find local app-server beforeConnect hook - skipping remote mobile app-server daemon proxy patch");
     return source;
   }
 
-  const helper =
-    "function codexLinuxRemoteMobileAppServerArgs(){return process.platform===`linux`?[`app-server`,`--remote-control`,`--analytics-default-enabled`]:[`app-server`,`--analytics-default-enabled`]}";
-  return `${helper}${source.split(REMOTE_MOBILE_APP_SERVER_ARGS_NEEDLE).join("args:codexLinuxRemoteMobileAppServerArgs()")}`;
+  return `${REMOTE_MOBILE_APP_SERVER_DAEMON_HELPER}${source
+    .replace(REMOTE_MOBILE_LOCAL_HOST_CONFIG_NEEDLE, REMOTE_MOBILE_LOCAL_HOST_CONFIG_REPLACEMENT)
+    .replace(REMOTE_MOBILE_BEFORE_CONNECT_NEEDLE, "beforeConnect:$1.id===`local`?()=>codexLinuxRemoteMobileBeforeConnect(()=>$2):void 0")}`;
 }
 
 function applyLinuxRemoteMobileAppServerRemoteControlExtractedAppPatch(extractedDir) {
@@ -483,7 +494,7 @@ function applyLinuxRemoteMobileAppServerRemoteControlExtractedAppPatch(extracted
     const filePath = path.join(buildDir, candidate);
     const source = fs.readFileSync(filePath, "utf8");
     if (
-      !source.includes(REMOTE_MOBILE_APP_SERVER_ARGS_NEEDLE) &&
+      !source.includes(REMOTE_MOBILE_LOCAL_HOST_CONFIG_NEEDLE) &&
       !source.includes(REMOTE_MOBILE_APP_SERVER_REMOTE_CONTROL_MARKER)
     ) {
       continue;
@@ -497,8 +508,8 @@ function applyLinuxRemoteMobileAppServerRemoteControlExtractedAppPatch(extracted
   }
 
   if (matched === 0) {
-    const reason = "no default app-server launch args found";
-    console.warn("WARN: Could not find default app-server launch args - skipping remote mobile app-server remote-control patch");
+    const reason = "no local app-server host config found";
+    console.warn("WARN: Could not find local app-server host config - skipping remote mobile app-server daemon proxy patch");
     return { matched, changed, reason };
   }
   return { matched, changed };

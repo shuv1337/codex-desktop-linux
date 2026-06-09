@@ -7,6 +7,8 @@ const path = require("node:path");
 // They stay fail-soft because upstream chunk names and minified symbols drift.
 const LINUX_SAFE_MONOSPACE_FONT_STACK =
   "\"Noto Sans Mono\", \"DejaVu Sans Mono\", \"Liberation Mono\", \"Ubuntu Mono\", ui-monospace, \"SFMono-Regular\", \"SF Mono\", Menlo, Consolas, monospace";
+const LINUX_TOOLTIP_COLLISION_PADDING_TOP = 44;
+const LINUX_WINDOW_CONTROLS_SAFE_AREA_RIGHT = 138;
 
 function applyLinuxSafeMonospaceFontStackPatch(currentSource) {
   const safeLinuxMonoFontPattern =
@@ -192,6 +194,74 @@ function applyLinuxOpaqueWindowsDefaultPatch(currentSource) {
   return patchedSource;
 }
 
+function applyLinuxWindowControlsSafeAreaPatch(currentSource) {
+  const currentInset = `applicationMenu:Object.freeze({left:0,right:${LINUX_WINDOW_CONTROLS_SAFE_AREA_RIGHT}})`;
+  const defaultInset = "applicationMenu:Object.freeze({left:0,right:0})";
+  if (currentSource.includes(defaultInset)) {
+    return currentSource.split(defaultInset).join(currentInset);
+  }
+
+  if (currentSource.includes(currentInset)) {
+    return currentSource;
+  }
+
+  if (currentSource.includes("applicationMenu:Object.freeze({left:0,right:")) {
+    console.warn(
+      "WARN: Could not find Linux window controls safe-area insertion point — skipping safe-area patch",
+    );
+  }
+
+  return currentSource;
+}
+
+function applyLinuxTooltipWindowControlsCollisionPatch(currentSource) {
+  const currentPadding = `padding:{top:${LINUX_TOOLTIP_COLLISION_PADDING_TOP},right:8,bottom:8,left:8}`;
+  const defaultMiddleware = "middleware:[a({mainAxis:C,crossAxis:t}),c({padding:8}),l({padding:8}),u({padding:8,apply({availableWidth:e,availableHeight:t,elements:n,rects:r})";
+  const patchedMiddleware =
+    `middleware:[a({mainAxis:C,crossAxis:t}),c({${currentPadding}}),l({${currentPadding}}),u({${currentPadding},apply({availableWidth:e,availableHeight:t,elements:n,rects:r})`;
+
+  if (currentSource.includes(defaultMiddleware)) {
+    return currentSource.split(defaultMiddleware).join(patchedMiddleware);
+  }
+
+  if (currentSource.includes(currentPadding)) {
+    return currentSource;
+  }
+
+  if (currentSource.includes("middleware:[") && currentSource.includes("availableWidth")) {
+    console.warn(
+      "WARN: Could not find tooltip collision padding insertion point — skipping Linux tooltip titlebar collision patch",
+    );
+  }
+
+  return currentSource;
+}
+
+function applyLinuxThreadSidePanelNativeTooltipPatch(currentSource) {
+  const nativeTitleNeedle = 'disabled:l,title:i,onClick:a,uniform:!0';
+  const nativeTitlePatch = 'disabled:l,onClick:a,uniform:!0';
+
+  if (!currentSource.includes("id:`thread.sidePanel.toggle`")) {
+    return currentSource;
+  }
+
+  if (currentSource.includes(nativeTitlePatch) && !currentSource.includes(nativeTitleNeedle)) {
+    return currentSource;
+  }
+
+  if (currentSource.includes(nativeTitleNeedle)) {
+    return currentSource.split(nativeTitleNeedle).join(nativeTitlePatch);
+  }
+
+  if (currentSource.includes("tooltipContent:i") && currentSource.includes("title:i")) {
+    console.warn(
+      "WARN: Could not find thread side panel native tooltip insertion point — skipping Linux duplicate side panel tooltip patch",
+    );
+  }
+
+  return currentSource;
+}
+
 function applyLinuxAppSunsetPatch(currentSource) {
   const statsigKey = "2929582856";
   const disabledGatePattern = /if\(!1&&([A-Za-z_$][\w$]*)\(`2929582856`\)\)\{/u;
@@ -287,6 +357,54 @@ function applyLinuxBrowserUseNonLocalNavigationPatch(currentSource) {
   if (currentSource.includes(messageNeedle) && currentSource.includes(statsigNeedle)) {
     console.warn(
       "WARN: Could not find Browser Use non-local navigation gate — skipping Linux Browser Use navigation patch",
+    );
+  }
+
+  return currentSource;
+}
+
+function applyLinuxBrowserUseExternalAvailabilityPatch(currentSource) {
+  const externalFeatureNeedle = "featureName:`browser_use_external`";
+  const statsigNeedle = "410065390";
+  let changed = false;
+
+  const alreadyPatched = () =>
+    /featureName:`browser_use_external`[\s\S]{0,900}?navigator\.userAgent\.includes\(`Linux`\)/.test(currentSource);
+
+  const availabilityPattern =
+    /let ([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*)\),([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)===`chrome-extension`\|\|([A-Za-z_$][\w$]*)&&\1\.enabled&&!\1\.isLoading,([A-Za-z_$][\w$]*)=\5===`chrome-extension`\?!1:\1\.isLoading,/g;
+
+  const patchedSource = currentSource.replace(
+    availabilityPattern,
+    (
+      match,
+      featureQueryVar,
+      featureQueryFn,
+      featureQueryArg,
+      availableVar,
+      windowTypeVar,
+      statsigVar,
+      loadingVar,
+      offset,
+    ) => {
+      const contextStart = Math.max(0, offset - 700);
+      const context = currentSource.slice(contextStart, offset + match.length);
+      if (!context.includes(externalFeatureNeedle) || !context.includes(statsigNeedle)) {
+        return match;
+      }
+
+      changed = true;
+      return `let ${featureQueryVar}=${featureQueryFn}(${featureQueryArg}),${availableVar}=${windowTypeVar}===\`chrome-extension\`||navigator.userAgent.includes(\`Linux\`)||${statsigVar}&&${featureQueryVar}.enabled&&!${featureQueryVar}.isLoading,${loadingVar}=${windowTypeVar}===\`chrome-extension\`||navigator.userAgent.includes(\`Linux\`)?!1:${featureQueryVar}.isLoading,`;
+    },
+  );
+
+  if (changed || alreadyPatched()) {
+    return patchedSource;
+  }
+
+  if (currentSource.includes(externalFeatureNeedle) && currentSource.includes(statsigNeedle)) {
+    console.warn(
+      "WARN: Could not find Browser Use external availability gate — skipping Linux external Browser Use availability patch",
     );
   }
 
@@ -1123,6 +1241,7 @@ module.exports = {
   applyBrowserAnnotationScreenshotPatch,
   applyLinuxAppServerFeatureEnablementPatch,
   applyLinuxBrowserUseAvailabilityPatch,
+  applyLinuxBrowserUseExternalAvailabilityPatch,
   applyLinuxBrowserUseNonLocalNavigationPatch,
   applyLinuxConfigWriteVersionConflictPatch,
   applyLinuxI18nGatePatch,
@@ -1130,6 +1249,9 @@ module.exports = {
   applyPersistentRateLimitFooterPatch,
   applyLinuxAppSunsetPatch,
   applyLinuxOpaqueWindowsDefaultPatch,
+  applyLinuxThreadSidePanelNativeTooltipPatch,
+  applyLinuxTooltipWindowControlsCollisionPatch,
+  applyLinuxWindowControlsSafeAreaPatch,
   applyLinuxSafeMonospaceFontStackPatch,
   applyLinuxFastModeModelGuardPatch,
   applyLocalEnvironmentActionModalDraftPatch,

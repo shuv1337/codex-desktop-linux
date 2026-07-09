@@ -161,10 +161,13 @@ Use, Codex CLI install/update, or local auto-update rebuilds.
 
 The Codex CLI is still required at runtime. The first launch can install or
 update `@openai/codex` with the bundled `npm`, or you can manage the CLI
-yourself. The launcher does not rank installed CLIs by version; it uses an
-explicit `CODEX_CLI_PATH` first, then the normal lookup order, and logs the
-resolved CLI path plus best-effort version so GUI PATH issues are visible.
-Set `CODEX_CLI_PATH=/path/to/codex` when you want to pin a specific binary.
+yourself. If you install the CLI manually through npm, include optional
+dependencies with `npm i -g --include=optional @openai/codex` so the Linux
+platform binary is present. The launcher does not rank installed CLIs by
+version; it uses an explicit `CODEX_CLI_PATH` first, then the normal lookup
+order, and logs the resolved CLI path plus best-effort version so GUI PATH
+issues are visible. Set `CODEX_CLI_PATH=/path/to/codex` when you want to pin a
+specific binary.
 
 X11 and Wayland sessions are supported. The launcher prefers XWayland on
 Wayland when available for better Electron popup positioning, then falls back
@@ -322,7 +325,7 @@ not download or extract the DMG themselves. See
 |---|---|
 | `/tmp` is mounted `noexec` | Set `TMPDIR` and `XDG_CACHE_HOME` to executable directories under `$HOME` |
 | Blank window or splash stuck | Check `~/.cache/codex-desktop/launcher.log` and whether port `5175` is already in use |
-| `CODEX_CLI_PATH` or CLI install error | Check `~/.cache/codex-desktop/launcher.log`, set `CODEX_CLI_PATH=/path/to/codex` to pin a binary, or install `@openai/codex` manually |
+| `CODEX_CLI_PATH` or CLI install error | Check `~/.cache/codex-desktop/launcher.log`, set `CODEX_CLI_PATH=/path/to/codex` to pin a binary, or install `@openai/codex` manually with optional dependencies |
 | Wayland / GPU / Vulkan hang | Try `CODEX_LINUX_RENDERING_MODE=wayland-gpu ./codex-app/start.sh` or persistent launch flags |
 | UI oversized or blurry (HiDPI / fractional scaling) | Try `CODEX_FORCE_DEVICE_SCALE_FACTOR=1 ./codex-app/start.sh` or `CODEX_OZONE_PLATFORM=x11 ./codex-app/start.sh`; see `./codex-app/start.sh --diagnose-scaling` |
 | Resize ghosting or stale frame trails | Try `CODEX_ELECTRON_DISABLE_GPU_COMPOSITING=1 ./codex-app/start.sh` or `--disable-gpu-compositing` |

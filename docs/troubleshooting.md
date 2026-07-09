@@ -6,7 +6,10 @@
 | Blank window | Check whether the configured webview port is already in use: `ss -tlnp \| grep -E '5175\|5176'` |
 | `ERR_CONNECTION_REFUSED` on the webview port | Ensure `python3` works and the configured port is free |
 | Stuck on Codex logo splash | Check `~/.cache/codex-desktop/launcher.log`; another process may be serving the webview port |
-| `CODEX_CLI_PATH` error | Reopen the app to retry automatic CLI install, or install manually with `npm i -g @openai/codex` / `npm i -g --prefix ~/.local @openai/codex` |
+| `CODEX_CLI_PATH` error | Reopen the app to retry automatic CLI install, or install manually with `npm i -g --include=optional @openai/codex` / `npm i -g --include=optional --prefix ~/.local @openai/codex` |
+| `Missing optional dependency @openai/codex-linux-x64` or malformed tool calls after a self-managed npm CLI install | Reinstall with optional dependencies: `npm i -g --include=optional @openai/codex`. To repair an existing nvm install, run `npm install --include=optional` from the installed `@openai/codex` package directory |
+| `codex-update-manager status --json` shows `cli_status: "update_required"` for `/usr/bin/codex` on Arch | Pacman itself has a newer package for the installed CLI. Update through pacman instead of npm, for example `sudo pacman -Syu`; pacman-managed CLI installs are intentionally not auto-updated through npm |
+| `codex-update-manager status --json` shows `/usr/bin/codex` with `cli_status: "up_to_date"` but `cli_official_latest_version` is newer than `cli_package_manager_latest_version` | The distro package is behind the official npm release, but pacman does not currently offer a newer package. Codex Desktop will not auto-switch channels; read `cli_error_message` and decide whether to stay on the distro-managed CLI or replace it with another install method |
 | `nix run` exits with no window or terminal output | Check `~/.cache/codex-desktop/launcher.log`; the Nix package still requires a user-provided `codex` CLI |
 | `gh auth status` works in terminal but fails inside Codex Desktop | See [GitHub CLI auth in app-launched shells](github-cli-auth.md) |
 | Electron hangs while CLI is outdated | Re-run the launcher and check `~/.cache/codex-desktop/launcher.log` plus `~/.local/state/codex-update-manager/service.log` |

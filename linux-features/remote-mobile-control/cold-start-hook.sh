@@ -134,6 +134,13 @@ remote_mobile_control_main() {
         return 0
     fi
 
+    local linux_app_dir="${CODEX_LINUX_APP_DIR:-}"
+    if [ -n "$linux_app_dir" ] && [ -f "$linux_app_dir/.codex-linux/desktop-app-server-remote-control-enabled" ]; then
+        cleanup_stale_remote_mobile_daemon_state "$codex_home"
+        echo "Desktop app-server launches with remote-control enabled; skipping standalone daemon autostart"
+        return 0
+    fi
+
     cleanup_stale_remote_mobile_daemon_state "$codex_home"
 
     local standalone_codex="${CODEX_REMOTE_CONTROL_CODEX_PATH:-$codex_home/packages/standalone/current/codex}"

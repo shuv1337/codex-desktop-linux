@@ -1,0 +1,33 @@
+{
+  "id": "shared-local-app-server",
+  "title": "Shared Local App-Server",
+  "description": "Desktop and CLI share one multi-client app-server daemon under the real CODEX_HOME.",
+  "defaultEnabled": false,
+  "entrypoints": {
+    "patchDescriptors": "./patch.js"
+  },
+  "resources": [
+    {
+      "source": "codex-wrapper.sh",
+      "target": ".codex-linux/features/shared-local-app-server/codex-wrapper.sh",
+      "mode": "0755"
+    },
+    {
+      "source": "doctor.sh",
+      "target": ".codex-linux/features/shared-local-app-server/doctor.sh",
+      "mode": "0755"
+    }
+  ],
+  "runtimeHooks": {
+    "env": {
+      "source": "shared-local-app-server.env",
+      "name": "env",
+      "mode": "0644"
+    },
+    "prelaunch": {
+      "source": "ensure-daemon.sh",
+      "name": "ensure-daemon.sh",
+      "mode": "0755"
+    }
+  }
+}

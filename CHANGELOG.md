@@ -5,6 +5,60 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Cold launches no longer stall for a full second between acquiring the
+  launcher lock and spawning Electron. The CLI version log line reads the
+  probe result through command substitution, and the probe's watchdog
+  subshell inherited that pipe: its `sleep 1` child survived the watchdog
+  kill and held the pipe open until the sleep expired, so even a CLI that
+  answers `--version` in ~50 ms blocked the launch path for ~1 s. The
+  watchdog now runs detached from the caller's stdout/stderr, cutting that
+  launch phase from ~1010 ms to ~74 ms and making the window (and GNOME's
+  startup feedback) appear about a second sooner on every cold start.
+
+### Changed
+
+- Cold starts overlap the webview server boot with the rest of launcher
+  startup and run the five bundled plugin cache syncs concurrently. The
+  launcher now spawns the Python webview server, does CLI lookup and cache
+  syncs while it boots, and only then waits for readiness and verifies the
+  origin — still strictly before Electron launches. The shared bundled
+  marketplace metadata is staged exactly once before the concurrent syncs
+  instead of being rewritten inside each sync. Measured on a warm-cache cold
+  start, the sync block drops from ~285 ms to ~110 ms and the webview wait
+  from ~150 ms to ~35 ms, putting Electron spawn ~330 ms earlier.
+- The launcher now passes `--disable-dev-shm-usage` to Electron only when
+  `/dev/shm` is missing, not writable, or smaller than 1 GiB (the container
+  case the flag exists for). On regular desktops Chromium's renderer/GPU
+  shared-memory buffers stay in RAM-backed `/dev/shm` instead of disk-backed
+  temp storage, which improves rendering performance. Override with
+  `CODEX_ELECTRON_DISABLE_DEV_SHM_USAGE=auto|0|1`.
+- The launcher now adds `--force-renderer-accessibility` only when an
+  assistive technology is detected (Orca or brltty running, the GNOME
+  screen-reader setting, the AT-SPI accessibility state that
+  `codex-computer-use-linux setup` enables — `org.a11y.Status IsEnabled` or
+  `toolkit-accessibility` — or the `GNOME_ACCESSIBILITY` /
+  `QT_LINUX_ACCESSIBILITY_ALWAYS_ON` / `ACCESSIBILITY_ENABLED` env markers).
+  Keeping the Chromium accessibility engine on in every renderer measurably
+  slows the webview UI, and the WSLg and wayland-gpu profiles already
+  skipped it for that reason. Session-bus probes are watchdog-capped at
+  0.5 s so a broken bus cannot delay launch.
+  `CODEX_FORCE_RENDERER_ACCESSIBILITY=1|0` still overrides the detection in
+  both directions.
+- Refactored ASAR patching internals so `scripts/patch-linux-window-ui.js` is a
+  CLI-only entrypoint and patch descriptors/implementations live under
+  `scripts/patches/`.
+
+### Removed
+
+- Removed legacy external Linux feature patch contracts:
+  `entrypoints.patches`, `entrypoints.mainBundlePatch`, `.patches`/`.default`
+  descriptor exports, the unsuffixed `extracted-app` phase, and
+  `patch-linux-window-ui.js` module exports.
+
+## [0.8.4] - 2026-06-20
+
 ### Added
 
 - The `make setup-native` Linux feature picker can now present a GUI checklist
@@ -53,9 +107,34 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   bundled plugin registry so the app keeps `read-aloud` installed, and the
   launcher syncs the plugin cache so new Codex windows expose the MCP tools
   through the same auto-install path as Computer Use.
+- The Home Manager and NixOS modules gained a
+  `programs.codexDesktopLinux.cliPackage` option that wraps the installed Codex
+  Desktop launcher (and its `.desktop` entry) so it always starts with
+  `CODEX_CLI_PATH` pointing at the chosen CLI. Because the path is baked into the
+  launcher instead of exported as a session variable, Codex Desktop reliably
+  finds the Codex CLI regardless of how it is launched (graphical autostart,
+  application launcher, terminal, or warm-start handoff), even when the Nix
+  profile is not on the graphical session `PATH`, and the change takes effect on
+  the next app launch with no re-login. When unset it falls back to
+  `remoteControl.package` if the remote-control service is enabled. This avoids
+  the `Unable to locate the Codex CLI binary. Set CODEX_CLI_PATH ...` startup
+  failure.
 
 ### Fixed
 
+- `codex-update-manager` no longer depends on the `fs4` crate for updater check
+  serialization. The updater now uses `std::fs::File::try_lock`, preserves the
+  existing non-blocking `check.lock` behavior when another check is active, and
+  adds regression coverage for `WouldBlock` lock contention semantics.
+- The avatar overlay is focusable on Linux so inline pet reply inputs can accept
+  keyboard input after being clicked, while still staying above the main Codex
+  window as an overlay.
+- Plugin marketplace browsing now preserves upstream's `remote_plugin`
+  feature sync on Linux, so current app servers can load the remote OpenAI
+  curated catalog instead of falling back to only locally installed plugins.
+- The opt-in `remote-mobile-control` cold-start hook no longer removes
+  `~/.local/bin/codex` when the launcher is actively using that symlink as
+  `CODEX_CLI_PATH`.
 - The in-app updater no longer quits into a broken `pkexec` install path when a
   minimal window-manager session has no graphical polkit authentication agent;
   it keeps the rebuilt package ready and reports a terminal `sudo

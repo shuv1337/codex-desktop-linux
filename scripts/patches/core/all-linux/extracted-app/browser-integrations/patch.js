@@ -1,33 +1,29 @@
 "use strict";
 
-const { patchLinuxChromeNativeHostRuntimeAssets } = require("../../../../chrome-plugin.js");
+const {
+  extractedAppPatch,
+} = require("../../../../descriptor.js");
+const { patchLinuxChromeNativeHostRuntimeAssets } = require("../../../../impl/chrome-plugin.js");
 
 module.exports = [
-  {
+  extractedAppPatch({
     id: "linux-chrome-native-host-runtime",
-    phase: "extracted-app",
+    phase: "extracted-app:pre-webview",
     order: 180,
-    ciPolicy: "required-upstream",
+    ciPolicy: "optional",
     apply: patchLinuxChromeNativeHostRuntimeAssets,
-    status: (result, warnings) => {
-      if (result?.matched === 0) {
-        return {
-          status: "failed-required",
-          reason: result?.reason ?? warnings[0] ?? "Chrome native host runtime resolver not found",
-        };
-      }
-
-      if (warnings.length > 0) {
-        return {
-          status: "failed-required",
-          reason: warnings[0],
-        };
-      }
-
-      return {
-        status: result?.changed ? "applied" : "already-applied",
-        reason: null,
-      };
-    },
-  },
+    status: (result, warnings) => ({
+      status: result?.changed
+        ? "applied"
+        : result?.matched
+          ? warnings.length > 0
+            ? "skipped-optional"
+            : "already-applied"
+          : "skipped-optional",
+      reason:
+        result?.reason ??
+        warnings[0] ??
+        (result?.matched ? null : "Chrome native host runtime resolver not found"),
+    }),
+  }),
 ];

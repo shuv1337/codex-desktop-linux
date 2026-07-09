@@ -50,15 +50,9 @@ const REMOTE_CONTROL_SELF_AUTO_CONNECT_MARKER = "codexLinuxRemoteControlSelfAuto
 const REMOTE_MOBILE_ACTIVE_STATUS_MARKER = "codexLinuxRemoteMobileActiveStatus";
 const REMOTE_CONTROL_STATUS_READ_GUARD_MARKER = "codexLinuxRemoteControlShouldReadStatus";
 const REMOTE_CONTROL_REVOKE_SETUP_RESET_MARKER = "codexLinuxRemoteControlResetMobileSetupAfterRevoke";
-const REMOTE_MOBILE_APP_SERVER_REMOTE_CONTROL_MARKER = "codexLinuxRemoteMobileAppServerProxyCommand";
-const REMOTE_MOBILE_LOCAL_HOST_CONFIG_NEEDLE =
-  "var I=`local`,ru={id:I,display_name:`Local`,kind:`local`}";
-const REMOTE_MOBILE_LOCAL_HOST_CONFIG_REPLACEMENT =
-  "var I=`local`,ru={id:I,display_name:`Local`,kind:`local`,codex_cli_command:codexLinuxRemoteMobileAppServerProxyCommand()}";
-const REMOTE_MOBILE_BEFORE_CONNECT_NEEDLE =
-  /beforeConnect:([A-Za-z_$][\w$]*)\.id===`local`\?\(\)=>((?:[A-Za-z_$][\w$]*)\(\{hostConfig:\1\}\)):void 0/u;
-const REMOTE_MOBILE_APP_SERVER_DAEMON_HELPER =
-  "function codexLinuxRemoteMobileCodexCommand(){return process.env.CODEX_REMOTE_CONTROL_CODEX_PATH||process.env.CODEX_CLI_PATH||`codex`}function codexLinuxRemoteMobileAppServerProxyCommand(){return process.platform===`linux`?[codexLinuxRemoteMobileCodexCommand(),`app-server`,`proxy`]:[]}function codexLinuxRemoteMobileStartDaemon(){return new Promise(e=>{if(process.platform!==`linux`||process.env.CODEX_REMOTE_CONTROL_DAEMON_AUTOSTART_DISABLED===`1`||process.env.CODEX_REMOTE_CONTROL_DESKTOP_DAEMON_START_DISABLED===`1`){e();return}let t=Number(process.env.CODEX_REMOTE_CONTROL_DAEMON_AUTOSTART_TIMEOUT_SECONDS??30),r=Number.isFinite(t)&&t>0?t*1e3:3e4,i=codexLinuxRemoteMobileCodexCommand(),a=m.spawn(i,[`remote-control`,`start`],{env:n.Pr(process.env),stdio:[`ignore`,`ignore`,`pipe`]});let o=``,s=setTimeout(()=>{try{a.kill()}catch{}console.warn(`WARN: Linux remote mobile app-server daemon start timed out`);e()},r);s.unref?.(),a.stderr?.on(`data`,e=>{o=(o+e.toString(`utf8`)).slice(-4e3)}),a.on(`error`,t=>{clearTimeout(s),console.warn(`WARN: Linux remote mobile app-server daemon start failed: `+(t instanceof Error?t.message:String(t))),e()}),a.on(`close`,t=>{clearTimeout(s),t!==0&&console.warn(`WARN: Linux remote mobile app-server daemon start exited with code `+t+`: `+o.trim()),e()})})}async function codexLinuxRemoteMobileBeforeConnect(e){await e?.(),await codexLinuxRemoteMobileStartDaemon()}";
+const REMOTE_MOBILE_APP_SERVER_REMOTE_CONTROL_MARKER = "codexLinuxRemoteMobileAppServerArgs";
+const REMOTE_MOBILE_APP_SERVER_ARGS_NEEDLE =
+  "[`-c`,`features.code_mode_host=true`,`app-server`,`--analytics-default-enabled`]";
 const REMOTE_MOBILE_PROJECTLESS_REMOTE_TASK_MARKER = "codexLinuxRemoteMobileProjectlessRemoteTaskId";
 const REMOTE_CONTROL_SELECTED_TAB_NEEDLE =
   "function rr({selectedConnectionsTab:e,showControlThisMacTab:t,showRemoteControlConnectionsSection:n,showTabbedSshPage:r}){return n?e===`control-this-mac`&&!t||e===`ssh`&&!r?`access-other-devices`:e:`ssh`}";
@@ -465,23 +459,23 @@ function applyLinuxRemoteMobileAppServerRemoteControlPatch(source) {
   if (source.includes(REMOTE_MOBILE_APP_SERVER_REMOTE_CONTROL_MARKER)) {
     return source;
   }
-  if (!source.includes(REMOTE_MOBILE_LOCAL_HOST_CONFIG_NEEDLE)) {
-    return source;
-  }
-  if (!REMOTE_MOBILE_BEFORE_CONNECT_NEEDLE.test(source)) {
-    console.warn("WARN: Could not find local app-server beforeConnect hook - skipping remote mobile app-server daemon proxy patch");
+  if (!source.includes(REMOTE_MOBILE_APP_SERVER_ARGS_NEEDLE)) {
     return source;
   }
 
+  const helper =
+    "function codexLinuxRemoteMobileAppServerArgs(){return process.platform===`linux`?[`-c`,`features.code_mode_host=true`,`app-server`,`--remote-control`,`--analytics-default-enabled`]:[`-c`,`features.code_mode_host=true`,`app-server`,`--analytics-default-enabled`]}";
   const replaced = source
-    .replace(REMOTE_MOBILE_LOCAL_HOST_CONFIG_NEEDLE, REMOTE_MOBILE_LOCAL_HOST_CONFIG_REPLACEMENT)
-    .replace(REMOTE_MOBILE_BEFORE_CONNECT_NEEDLE, "beforeConnect:$1.id===`local`?()=>codexLinuxRemoteMobileBeforeConnect(()=>$2):void 0");
+    .split(REMOTE_MOBILE_APP_SERVER_ARGS_NEEDLE)
+    .join("codexLinuxRemoteMobileAppServerArgs()");
+  // Insert after a leading "use strict" so prepending the helper does not
+  // demote the directive to a plain expression and de-strict the bundle.
   const insertAt = replaced.startsWith('"use strict";')
     ? '"use strict";'.length
     : replaced.startsWith("'use strict';")
       ? "'use strict';".length
       : 0;
-  return `${replaced.slice(0, insertAt)}${REMOTE_MOBILE_APP_SERVER_DAEMON_HELPER}${replaced.slice(insertAt)}`;
+  return `${replaced.slice(0, insertAt)}${helper}${replaced.slice(insertAt)}`;
 }
 
 function applyLinuxRemoteMobileAppServerRemoteControlExtractedAppPatch(extractedDir) {
@@ -503,7 +497,7 @@ function applyLinuxRemoteMobileAppServerRemoteControlExtractedAppPatch(extracted
     const filePath = path.join(buildDir, candidate);
     const source = fs.readFileSync(filePath, "utf8");
     if (
-      !source.includes(REMOTE_MOBILE_LOCAL_HOST_CONFIG_NEEDLE) &&
+      !source.includes(REMOTE_MOBILE_APP_SERVER_ARGS_NEEDLE) &&
       !source.includes(REMOTE_MOBILE_APP_SERVER_REMOTE_CONTROL_MARKER)
     ) {
       continue;
@@ -517,8 +511,8 @@ function applyLinuxRemoteMobileAppServerRemoteControlExtractedAppPatch(extracted
   }
 
   if (matched === 0) {
-    const reason = "no local app-server host config found";
-    console.warn("WARN: Could not find local app-server host config - skipping remote mobile app-server daemon proxy patch");
+    const reason = "no default app-server launch args found";
+    console.warn("WARN: Could not find default app-server launch args - skipping remote mobile app-server remote-control patch");
     return { matched, changed, reason };
   }
   return { matched, changed };
@@ -1292,9 +1286,7 @@ function applyLinuxRemoteMobileConversationHydrationPatch(source) {
     }
   }
 
-  // Upstream 26.527.x removed the browserUse/computerUse turn-route tracking and
-  // simplified each unknown-conversation guard to `if(!this.conversations.get(x)){error;break}`.
-  // Re-implement hydrate-on-turn/started + queue-while-hydrating without the deleted routes.
+  // Hydrate on turn/started and queue later events while that read is in flight.
   if (!patched.includes(REMOTE_MOBILE_NOTIFICATION_QUEUE_MARKER)) {
     const unknownTurnNeedle =
       /(let\{threadId:([A-Za-z_$][\w$]*),turn:[A-Za-z_$][\w$]*\}=([A-Za-z_$][\w$]*)\.params,([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\(\2\);)if\(!this\.conversations\.get\(\4\)\)\{([A-Za-z_$][\w$]*)\.error\(`Received turn\/started for unknown conversation`,\{safe:\{conversationId:\4\},sensitive:\{\}\}\);break\}/u;
@@ -1348,52 +1340,16 @@ function applyLinuxRemoteMobileConversationHydrationPatch(source) {
 
 function applyLinuxRemoteControlStatusReadGuardPatch(source) {
   if (source.includes(REMOTE_CONTROL_STATUS_READ_GUARD_MARKER)) {
-    return source.replace(
-      /function codexLinuxRemoteControlShouldReadStatus\(e\)\{return !\(typeof navigator!=`undefined`&&navigator\.userAgent\.includes\(`Linux`\)&&typeof e==`string`&&\(?e\.startsWith\(`remote-ssh`\)\)?\)\}/u,
-      `function ${REMOTE_CONTROL_STATUS_READ_GUARD_MARKER}(e){return !(typeof navigator!=\`undefined\`&&navigator.userAgent.includes(\`Linux\`)&&typeof e==\`string\`&&(e.startsWith(\`remote-ssh\`)||e.startsWith(\`remote-control:\`)))}`,
-    );
+    return source;
   }
   if (!source.includes("remoteControl/status/read")) {
     return source;
   }
 
-  const replacementForDirectStatusRead = (match) => {
-    const [
-      needle,
-      functionName,
-      storeVar,
-      clientVar,
-      hostVar,
-      generationVar,
-      generationFn,
-      initialValueVar,
-      statusAtomVar,
-      notificationParamsVar,
-      isCurrentFn,
-      readResultVar,
-      errorVar,
-      loggerVar,
-    ] = match;
-    const replacement =
-      `function ${REMOTE_CONTROL_STATUS_READ_GUARD_MARKER}(e){return !(typeof navigator!=\`undefined\`&&navigator.userAgent.includes(\`Linux\`)&&typeof e==\`string\`&&(e.startsWith(\`remote-ssh\`)||e.startsWith(\`remote-control:\`)))}` +
-      `function ${functionName}(${storeVar},${clientVar}){let ${hostVar}=${clientVar}.getHostId(),${generationVar}=${generationFn}(${storeVar},${hostVar}),${initialValueVar}=${storeVar}.get(${statusAtomVar},${hostVar});` +
-      `${clientVar}.addNotificationCallback(\`remoteControl/status/changed\`,({params:${notificationParamsVar}})=>{${isCurrentFn}(${storeVar},${hostVar},${generationVar})&&${storeVar}.set(${statusAtomVar},${hostVar},${notificationParamsVar})});` +
-      `if(!${REMOTE_CONTROL_STATUS_READ_GUARD_MARKER}(${hostVar})){${isCurrentFn}(${storeVar},${hostVar},${generationVar})&&${storeVar}.set(${statusAtomVar},${hostVar},{status:\`disabled\`,available:!1,accessRequired:!1});return}` +
-      `${clientVar}.sendRequest(\`remoteControl/status/read\`,void 0).then(${readResultVar}=>{${storeVar}.get(${statusAtomVar},${hostVar})===${initialValueVar}&&${isCurrentFn}(${storeVar},${hostVar},${generationVar})&&${storeVar}.set(${statusAtomVar},${hostVar},${readResultVar})}).catch(${errorVar}=>{${isCurrentFn}(${storeVar},${hostVar},${generationVar})&&${loggerVar}.error(\`Failed to read remote-control status\`,{safe:{},sensitive:{error:${errorVar}}})})}`;
-    return source.replace(needle, replacement);
-  };
-
   const statusReadPattern =
-    /function ([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*),([A-Za-z_$][\w$]*)\)\{let ([A-Za-z_$][\w$]*)=\3\.getHostId\(\),([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\(\2,\4\),([A-Za-z_$][\w$]*)=\2\.get\(([A-Za-z_$][\w$]*),\4\);\3\.addNotificationCallback\(`remoteControl\/status\/changed`,\(\{params:([A-Za-z_$][\w$]*)\}\)=>\{([A-Za-z_$][\w$]*)\(\2,\4,\5\)&&\2\.set\(\8,\4,\9\)\}\),\3\.sendRequest\(`remoteControl\/status\/read`,void 0\)\.then\(([A-Za-z_$][\w$]*)=>\{\2\.get\(\8,\4\)===\7&&\10\(\2,\4,\5\)&&\2\.set\(\8,\4,\11\)\}\)\.catch\(([A-Za-z_$][\w$]*)=>\{\10\(\2,\4,\5\)&&([A-Za-z_$][\w$]*)\.error\(`Failed to read remote-control status`,\{safe:\{\},sensitive:\{error:\12\}\}\)\}\)\}/u;
-  const match = source.match(statusReadPattern);
-  if (match != null) {
-    return replacementForDirectStatusRead(match);
-  }
-
-  const helperStatusReadPattern =
     /function ([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*),([A-Za-z_$][\w$]*)\)\{let ([A-Za-z_$][\w$]*)=\3\.getHostId\(\),([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\(\2,\4\),([A-Za-z_$][\w$]*)=\2\.get\(([A-Za-z_$][\w$]*),\4\);\3\.addNotificationCallback\(`remoteControl\/status\/changed`,\(\{params:([A-Za-z_$][\w$]*)\}\)=>\{([A-Za-z_$][\w$]*)\(\2,\4,\5\)&&([A-Za-z_$][\w$]*)\(\2,\4,\9\)\}\),\3\.sendRequest\(`remoteControl\/status\/read`,void 0\)\.then\(([A-Za-z_$][\w$]*)=>\{\2\.get\(\8,\4\)===\7&&\10\(\2,\4,\5\)&&\11\(\2,\4,\12\)\}\)\.catch\(([A-Za-z_$][\w$]*)=>\{\10\(\2,\4,\5\)&&([A-Za-z_$][\w$]*)\.error\(`Failed to read remote-control status`,\{safe:\{\},sensitive:\{error:\13\}\}\)\}\)\}/u;
-  const helperMatch = source.match(helperStatusReadPattern);
-  if (helperMatch == null) {
+  const match = source.match(statusReadPattern);
+  if (match == null) {
     console.warn("WARN: Could not find remote-control status read needle - skipping Linux remote-control status guard patch");
     return source;
   }
@@ -1414,7 +1370,7 @@ function applyLinuxRemoteControlStatusReadGuardPatch(source) {
     readResultVar,
     errorVar,
     loggerVar,
-  ] = helperMatch;
+  ] = match;
   const replacement =
     `function ${REMOTE_CONTROL_STATUS_READ_GUARD_MARKER}(e){return !(typeof navigator!=\`undefined\`&&navigator.userAgent.includes(\`Linux\`)&&typeof e==\`string\`&&(e.startsWith(\`remote-ssh\`)||e.startsWith(\`remote-control:\`)))}` +
     `function ${functionName}(${storeVar},${clientVar}){let ${hostVar}=${clientVar}.getHostId(),${generationVar}=${generationFn}(${storeVar},${hostVar}),${initialValueVar}=${storeVar}.get(${statusAtomVar},${hostVar});` +
@@ -1552,9 +1508,9 @@ function applyLinuxRemoteMobileProjectlessRemoteTaskPatch(source) {
     return source;
   }
 
-  const fallbackPattern =
-    /function ([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*),([A-Za-z_$][\w$]*),([A-Za-z_$][\w$]*)\)\{let ([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\(\2,\3\),([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\(\5\);if\(!\7\)\{(?:([A-Za-z_$][\w$]*)\.has\(\2\.task\.id\)\|\|\(\9\.add\(\2\.task\.id\),)?([A-Za-z_$][\w$]*)\.warning\(`No owner repo found for remote task`,\{safe:\{taskId:\2\.task\.id\},sensitive:\{\}\}\)(?:\))?;return\}/u;
-  const match = source.match(fallbackPattern);
+  const currentPattern =
+    /function ([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*),([A-Za-z_$][\w$]*),([A-Za-z_$][\w$]*)\)\{let ([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\(\2,\3\),([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\(\5\);if\(!\7\)\{([A-Za-z_$][\w$]*)\.has\(\2\.task\.id\)\|\|\(\9\.add\(\2\.task\.id\),([A-Za-z_$][\w$]*)\.warning\(`No owner repo found for remote task`,\{safe:\{taskId:\2\.task\.id\},sensitive:\{\}\}\)\);return\}/u;
+  const match = source.match(currentPattern);
   if (match == null) {
     console.warn("WARN: Could not find remote task owner-repo grouping needle - skipping projectless remote task patch");
     return source;
@@ -1626,7 +1582,7 @@ module.exports = [
   {
     id: "linux-remote-control-load-gate",
     phase: "webview-asset",
-    pattern: /^(?:remote-connection-visibility|app-initial~app-main~worktree-init-v2-page~remote-conversation-page~new-thread-panel-page~o~).*\.js$/,
+    pattern: /^app-initial~app-main~hotkey-window-new-thread-page~hotkey-window-home-page~composer-utility-bar-.*\.js$/,
     order: 20_118,
     ciPolicy: "optional",
     missingDescription: "remote-control loader gate bundle",
@@ -1706,7 +1662,7 @@ module.exports = [
   {
     id: "linux-remote-mobile-conversation-hydration",
     phase: "webview-asset",
-    pattern: /^(?:app-server-manager-signals|thread-context-inputs|app-initial~app-main~worktree-init-v2-page~remote-conversation-page~).*\.js$/,
+    pattern: /^app-initial~app-main~hotkey-window-thread-page~thread-app-shell-chrome~header~remote-conver~.*\.js$/,
     order: 20_150,
     ciPolicy: "optional",
     missingDescription: "app-server manager signals bundle",
@@ -1716,7 +1672,7 @@ module.exports = [
   {
     id: "linux-remote-control-status-read-guard",
     phase: "webview-asset",
-    pattern: /^(?:app-server-manager-signals|thread-context-inputs|app-initial~app-main~worktree-init-v2-page~remote-conversation-page~(?:new-thread-panel-page~o~|pull-requests-page~plug~)).*\.js$/,
+    pattern: /^app-initial~app-main~hotkey-window-thread-page~thread-app-shell-chrome~header~remote-conver~.*\.js$/,
     order: 20_151,
     ciPolicy: "optional",
     missingDescription: "app-server manager signals bundle",
@@ -1756,7 +1712,7 @@ module.exports = [
   {
     id: "linux-remote-mobile-projectless-remote-task",
     phase: "webview-asset",
-    pattern: /^app-initial~app-main~remote-conversation-page~new-thread-panel-page~onboarding-page~appgen-~.*\.js$/,
+    pattern: /^app-initial~app-main~hotkey-window-new-thread-page~hotkey-window-home-page~composer-utility-bar-.*\.js$/,
     order: 20_170,
     ciPolicy: "optional",
     missingDescription: "sidebar project groups bundle",

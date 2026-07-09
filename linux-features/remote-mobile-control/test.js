@@ -43,8 +43,12 @@ const {
 } = require("./patch.js");
 
 const REPO_ROOT = path.resolve(__dirname, "../..");
+const REMOTE_CONTROL_GATE_ASSET =
+  "app-initial~app-main~hotkey-window-new-thread-page~hotkey-window-home-page~composer-utility-bar-test.js";
+const APP_SERVER_MANAGER_ASSET =
+  "app-initial~app-main~hotkey-window-thread-page~thread-app-shell-chrome~header~remote-conver~test.js";
 const PROJECTLESS_REMOTE_TASK_ASSET =
-  "app-initial~app-main~remote-conversation-page~new-thread-panel-page~onboarding-page~appgen-~o4yhvtva-CRxLUCiX.js";
+  REMOTE_CONTROL_GATE_ASSET;
 
 function syntheticMainBundle() {
   return [
@@ -209,10 +213,7 @@ function syntheticSettingsRefreshBundle() {
 }
 
 function syntheticAppServerLaunchBundle() {
-  return [
-    "var I=`local`,ru={id:I,display_name:`Local`,kind:`local`};",
-    "function createAppServerConnection(e,i=ru){return new Client({beforeConnect:i.id===`local`?()=>yY({hostConfig:i}):void 0})}",
-  ].join("");
+  return "var Uz=`Codex Desktop`,Wz=[`-c`,`features.code_mode_host=true`,`app-server`,`--analytics-default-enabled`],Gz={appServerVersion:`current`};";
 }
 
 function syntheticCurrentSettingsBundle() {
@@ -286,7 +287,8 @@ function syntheticAppServerManagerStatusBundle() {
     "var bO={};",
     "function wO(e,t){return e.bump(t)}",
     "function TO(e,t,n){return e.current(t)===n}",
-    "function SO(e,t){let n=t.getHostId(),r=wO(e,n),i=e.get(bO,n);t.addNotificationCallback(`remoteControl/status/changed`,({params:t})=>{TO(e,n,r)&&e.set(bO,n,t)}),t.sendRequest(`remoteControl/status/read`,void 0).then(t=>{e.get(bO,n)===i&&TO(e,n,r)&&e.set(bO,n,t)}).catch(t=>{TO(e,n,r)&&z.error(`Failed to read remote-control status`,{safe:{},sensitive:{error:t}})})}",
+    "function PO(e,t,n){return e.set(bO,t,n)}",
+    "function SO(e,t){let n=t.getHostId(),r=wO(e,n),i=e.get(bO,n);t.addNotificationCallback(`remoteControl/status/changed`,({params:t})=>{TO(e,n,r)&&PO(e,n,t)}),t.sendRequest(`remoteControl/status/read`,void 0).then(t=>{e.get(bO,n)===i&&TO(e,n,r)&&PO(e,n,t)}).catch(t=>{TO(e,n,r)&&z.error(`Failed to read remote-control status`,{safe:{},sensitive:{error:t}})})}",
   ].join("");
 }
 
@@ -372,6 +374,7 @@ const COLD_START_TEST_ENV_KEYS = [
   "CODEX_REMOTE_CONTROL_CODEX_RELEASE",
   "CODEX_REMOTE_CONTROL_DAEMON_AUTOSTART_DISABLED",
   "CODEX_REMOTE_CONTROL_DAEMON_AUTOSTART_TIMEOUT_SECONDS",
+  "CODEX_REMOTE_CONTROL_FORCE_COLD_START_DAEMON",
   "CODEX_REMOTE_CONTROL_RUNTIME_AUTO_INSTALL_DISABLED",
 ];
 
@@ -408,10 +411,10 @@ function runStageHook(env) {
   });
 }
 
-function writeDesktopAppServerDaemonProxyMarker(appDir) {
-  const marker = path.join(appDir, ".codex-linux", "desktop-app-server-daemon-proxy-enabled");
+function writeDesktopAppServerRemoteControlMarker(appDir) {
+  const marker = path.join(appDir, ".codex-linux", "desktop-app-server-remote-control-enabled");
   fs.mkdirSync(path.dirname(marker), { recursive: true });
-  fs.writeFileSync(marker, "desktop-app-server-daemon-proxy\n");
+  fs.writeFileSync(marker, "desktop-app-server-remote-control\n");
 }
 
 test("remote mobile control feature stays disabled until listed in features.json", () => {
@@ -420,17 +423,17 @@ test("remote mobile control feature stays disabled until listed in features.json
   });
 });
 
-test("remote mobile stage hook writes installed Desktop app-server daemon proxy marker from patched app layout", () => {
+test("remote mobile stage hook writes installed Desktop app-server ownership marker from patched app layout", () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "codex-remote-mobile-stage-"));
   try {
     const installDir = path.join(tempRoot, "package", "opt", "codex-desktop");
     const workDir = path.join(tempRoot, "work");
     const buildDir = path.join(workDir, "app-extracted", ".vite", "build");
-    const marker = path.join(installDir, ".codex-linux", "desktop-app-server-daemon-proxy-enabled");
+    const marker = path.join(installDir, ".codex-linux", "desktop-app-server-remote-control-enabled");
     const coldStartHook = path.join(installDir, ".codex-linux", "cold-start.d", "remote-mobile-control");
 
     fs.mkdirSync(buildDir, { recursive: true });
-    fs.writeFileSync(path.join(buildDir, "main.js"), "globalThis.codexLinuxRemoteMobileAppServerProxyCommand=true;");
+    fs.writeFileSync(path.join(buildDir, "main.js"), "globalThis.codexLinuxRemoteMobileAppServerArgs=true;");
 
     const result = runStageHook({
       ARCH: "x64",
@@ -441,20 +444,20 @@ test("remote mobile stage hook writes installed Desktop app-server daemon proxy 
     });
 
     assert.equal(result.status, 0, result.stderr || result.stdout);
-    assert.equal(fs.readFileSync(marker, "utf8"), "desktop-app-server-daemon-proxy\n");
+    assert.equal(fs.readFileSync(marker, "utf8"), "desktop-app-server-remote-control\n");
     assert.equal(fs.existsSync(coldStartHook), true);
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true });
   }
 });
 
-test("remote mobile stage hook leaves Desktop daemon proxy marker absent when patch marker is missing", () => {
+test("remote mobile stage hook leaves Desktop ownership marker absent when patch marker is missing", () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "codex-remote-mobile-stage-"));
   try {
     const installDir = path.join(tempRoot, "package", "opt", "codex-desktop");
     const workDir = path.join(tempRoot, "work");
     const buildDir = path.join(workDir, "app-extracted", ".vite", "build");
-    const marker = path.join(installDir, ".codex-linux", "desktop-app-server-daemon-proxy-enabled");
+    const marker = path.join(installDir, ".codex-linux", "desktop-app-server-remote-control-enabled");
 
     fs.mkdirSync(buildDir, { recursive: true });
     fs.writeFileSync(path.join(buildDir, "main.js"), "globalThis.someOtherPatch=true;");
@@ -469,7 +472,7 @@ test("remote mobile stage hook leaves Desktop daemon proxy marker absent when pa
 
     assert.equal(result.status, 0, result.stderr || result.stdout);
     assert.equal(fs.existsSync(marker), false);
-    assert.match(result.stderr, /Desktop app-server daemon proxy marker not found/);
+    assert.match(result.stderr, /Desktop app-server remote-control marker not found/);
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true });
   }
@@ -588,7 +591,7 @@ test("remote mobile cold-start hook preserves user codex symlinks outside the st
   }
 });
 
-test("remote mobile cold-start hook starts the managed daemon even when Desktop uses the daemon proxy", () => {
+test("remote mobile cold-start hook skips daemon when Desktop app-server owns remote-control", () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "codex-remote-mobile-cold-start-"));
   try {
     const home = path.join(tempRoot, "home");
@@ -600,7 +603,7 @@ test("remote mobile cold-start hook starts the managed daemon even when Desktop 
     fs.mkdirSync(path.dirname(standaloneCodex), { recursive: true });
     fs.mkdirSync(home, { recursive: true });
     fs.mkdirSync(appDir, { recursive: true });
-    writeDesktopAppServerDaemonProxyMarker(appDir);
+    writeDesktopAppServerRemoteControlMarker(appDir);
     fs.writeFileSync(
       standaloneCodex,
       `#!/usr/bin/env sh\nprintf '%s\\n' "$*" >> ${JSON.stringify(callsLog)}\nexit 0\n`,
@@ -615,22 +618,25 @@ test("remote mobile cold-start hook starts the managed daemon even when Desktop 
     });
 
     assert.equal(result.status, 0, result.stderr || result.stdout);
-    assert.equal(fs.readFileSync(callsLog, "utf8"), "remote-control start\n");
-    assert.match(result.stdout, /Remote mobile control daemon is ready/);
+    assert.equal(fs.existsSync(callsLog), false);
+    assert.match(result.stdout, /Desktop app-server launches with remote-control enabled/);
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true });
   }
 });
 
-test("remote mobile cold-start hook removes dead standalone daemon pid files before daemon start", () => {
+test("remote mobile cold-start hook removes dead standalone daemon pid files when Desktop app-server owns remote-control", () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "codex-remote-mobile-cold-start-"));
   try {
     const home = path.join(tempRoot, "home");
     const codexHome = path.join(tempRoot, "codex-home");
     const daemonDir = path.join(codexHome, "app-server-daemon");
+    const appDir = path.join(tempRoot, "package", "share", "codex-desktop", "app");
 
     fs.mkdirSync(home, { recursive: true });
     fs.mkdirSync(daemonDir, { recursive: true });
+    fs.mkdirSync(appDir, { recursive: true });
+    writeDesktopAppServerRemoteControlMarker(appDir);
     fs.writeFileSync(
       path.join(daemonDir, "app-server.pid"),
       JSON.stringify({ pid: 999999, processStartTime: "fixture" }),
@@ -642,7 +648,7 @@ test("remote mobile cold-start hook removes dead standalone daemon pid files bef
 
     const result = runColdStartHook({
       CODEX_HOME: codexHome,
-      CODEX_REMOTE_CONTROL_RUNTIME_AUTO_INSTALL_DISABLED: "1",
+      CODEX_LINUX_APP_DIR: appDir,
       HOME: home,
     });
 
@@ -650,32 +656,37 @@ test("remote mobile cold-start hook removes dead standalone daemon pid files bef
     assert.equal(fs.existsSync(path.join(daemonDir, "app-server.pid")), false);
     assert.equal(fs.existsSync(path.join(daemonDir, "app-server-updater.pid")), false);
     assert.match(result.stdout, /Removed stale remote mobile control daemon pid file/);
+    assert.match(result.stdout, /Desktop app-server launches with remote-control enabled/);
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true });
   }
 });
 
-test("remote mobile cold-start hook preserves live standalone daemon pid files", () => {
+test("remote mobile cold-start hook preserves live standalone daemon pid files when Desktop app-server owns remote-control", () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "codex-remote-mobile-cold-start-"));
   try {
     const home = path.join(tempRoot, "home");
     const codexHome = path.join(tempRoot, "codex-home");
     const daemonDir = path.join(codexHome, "app-server-daemon");
+    const appDir = path.join(tempRoot, "package", "share", "codex-desktop", "app");
     const pidFile = path.join(daemonDir, "app-server.pid");
 
     fs.mkdirSync(home, { recursive: true });
     fs.mkdirSync(daemonDir, { recursive: true });
+    fs.mkdirSync(appDir, { recursive: true });
+    writeDesktopAppServerRemoteControlMarker(appDir);
     fs.writeFileSync(pidFile, JSON.stringify({ pid: process.pid, processStartTime: "fixture" }));
 
     const result = runColdStartHook({
       CODEX_HOME: codexHome,
-      CODEX_REMOTE_CONTROL_RUNTIME_AUTO_INSTALL_DISABLED: "1",
+      CODEX_LINUX_APP_DIR: appDir,
       HOME: home,
     });
 
     assert.equal(result.status, 0, result.stderr || result.stdout);
     assert.equal(fs.existsSync(pidFile), true);
     assert.doesNotMatch(result.stdout, /Removed stale remote mobile control daemon pid file/);
+    assert.match(result.stdout, /Desktop app-server launches with remote-control enabled/);
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true });
   }
@@ -739,25 +750,23 @@ test("remote mobile control feature exposes opt-in main-bundle and webview patch
       descriptor.id === "feature:remote-mobile-control:linux-remote-control-status-read-guard"
     );
     assert.ok(statusGuardDescriptor);
-    assert.equal(
-      statusGuardDescriptor.pattern.test(
-        "app-initial~app-main~worktree-init-v2-page~remote-conversation-page~pull-requests-page~plug~kmtatxxf-IUI8plS9.js",
-      ),
-      true,
-    );
+    assert.equal(statusGuardDescriptor.pattern.test(APP_SERVER_MANAGER_ASSET), true);
+    assert.equal(statusGuardDescriptor.pattern.test("app-server-manager-signals-test.js"), false);
 
     const hydrationDescriptor = descriptors.find((descriptor) =>
       descriptor.id === "feature:remote-mobile-control:linux-remote-mobile-conversation-hydration"
     );
     assert.ok(hydrationDescriptor);
-    assert.equal(hydrationDescriptor.pattern.test("app-server-manager-signals-test.js"), true);
-    assert.equal(
-      hydrationDescriptor.pattern.test(
-        "app-initial~app-main~worktree-init-v2-page~remote-conversation-page~onboarding-page~hotkey-~ke3yc5wu-BLQiF1Gs.js",
-      ),
-      true,
-    );
+    assert.equal(hydrationDescriptor.pattern.test(APP_SERVER_MANAGER_ASSET), true);
+    assert.equal(hydrationDescriptor.pattern.test("app-server-manager-signals-test.js"), false);
     assert.equal(hydrationDescriptor.pattern.test("remote-connections-settings-fixture.js"), false);
+
+    const loadGateDescriptor = descriptors.find((descriptor) =>
+      descriptor.id === "feature:remote-mobile-control:linux-remote-control-load-gate"
+    );
+    assert.ok(loadGateDescriptor);
+    assert.equal(loadGateDescriptor.pattern.test(REMOTE_CONTROL_GATE_ASSET), true);
+    assert.equal(loadGateDescriptor.pattern.test("remote-connection-visibility-test.js"), false);
   });
 });
 
@@ -906,17 +915,21 @@ test("Linux remote-control client recovery handles bare missing key material err
   assert.match(patched, /e\.message===`Remote-control client key material missing`/);
 });
 
-test("Linux remote mobile app-server launch uses the managed daemon proxy", () => {
+test("Linux remote mobile app-server launch enables remote control on the Desktop app-server", () => {
   const source = syntheticAppServerLaunchBundle();
   const patched = applyLinuxRemoteMobileAppServerRemoteControlPatch(source);
 
   assert.notEqual(patched, source);
-  assert.match(patched, /codexLinuxRemoteMobileAppServerProxyCommand/);
-  assert.match(patched, /codex_cli_command:codexLinuxRemoteMobileAppServerProxyCommand\(\)/);
-  assert.match(patched, /`app-server`,`proxy`/);
-  assert.match(patched, /CODEX_REMOTE_CONTROL_DAEMON_AUTOSTART_DISABLED/);
-  assert.match(patched, /codexLinuxRemoteMobileBeforeConnect\(\(\)=>yY\(\{hostConfig:i\}\)\)/);
-  assert.doesNotMatch(patched, /`--remote-control`/);
+  assert.match(patched, /codexLinuxRemoteMobileAppServerArgs/);
+  assert.match(
+    patched,
+    /process\.platform===`linux`\?\[`-c`,`features\.code_mode_host=true`,`app-server`,`--remote-control`,`--analytics-default-enabled`\]:\[`-c`,`features\.code_mode_host=true`,`app-server`,`--analytics-default-enabled`\]/,
+  );
+  assert.doesNotMatch(
+    patched,
+    /Wz=\[`-c`,`features\.code_mode_host=true`,`app-server`,`--analytics-default-enabled`\]/,
+  );
+  assert.match(patched, /Wz=codexLinuxRemoteMobileAppServerArgs\(\)/);
   assert.equal(applyLinuxRemoteMobileAppServerRemoteControlPatch(patched), patched);
 });
 
@@ -925,7 +938,7 @@ test("Linux remote mobile app-server launch keeps a leading use strict directive
   const patched = applyLinuxRemoteMobileAppServerRemoteControlPatch(source);
 
   assert.notEqual(patched, source);
-  assert.match(patched, /^"use strict";function codexLinuxRemoteMobileCodexCommand/);
+  assert.match(patched, /^"use strict";function codexLinuxRemoteMobileAppServerArgs/);
   assert.equal(applyLinuxRemoteMobileAppServerRemoteControlPatch(patched), patched);
 });
 
@@ -2042,16 +2055,6 @@ test("Linux remote-control status guard skips remote-control environment status 
   assert.equal(codexLinuxRemoteControlShouldReadStatus("local"), true);
 });
 
-test("Linux remote-control status guard migrates older remote-ssh-only guard", () => {
-  const oldPatched = applyLinuxRemoteControlStatusReadGuardPatch(syntheticAppServerManagerStatusBundle()).replace(
-    "||e.startsWith(`remote-control:`)",
-    "",
-  );
-  const patched = applyLinuxRemoteControlStatusReadGuardPatch(oldPatched);
-
-  assert.match(patched, /startsWith\(`remote-control:`\)/);
-});
-
 test("Linux remote-control settings UX patch warns when SSH release handling drifts after partial patching", () => {
   const source = (syntheticSettingsBundle() + syntheticSshInstallSettingsBundle()).replace(
     "installedCodexVersion:h",
@@ -2073,9 +2076,13 @@ test("remote mobile feature patch report records feature metadata and partial wa
       fs.mkdirSync(buildDir, { recursive: true });
       fs.mkdirSync(assetsDir, { recursive: true });
       fs.writeFileSync(path.join(buildDir, "main.js"), syntheticCurrentMainBundle());
+      fs.writeFileSync(path.join(buildDir, "src-test.js"), syntheticAppServerLaunchBundle());
       fs.writeFileSync(path.join(tempApp, "package.json"), JSON.stringify({ name: "codex" }));
       fs.writeFileSync(path.join(assetsDir, "app-test.png"), "");
-      fs.writeFileSync(path.join(assetsDir, "remote-connection-visibility-test.js"), syntheticRemoteConnectionVisibilityBundle());
+      fs.writeFileSync(
+        path.join(assetsDir, REMOTE_CONTROL_GATE_ASSET),
+        syntheticRemoteConnectionVisibilityBundle() + syntheticSidebarProjectGroupsBundle(),
+      );
       fs.writeFileSync(path.join(assetsDir, "app-main-test.js"), syntheticAppMainFeatureSyncBundle() + syntheticAppMainEnablementBridgeBundle() + syntheticAppMainActiveStatusBundle());
       fs.writeFileSync(
         path.join(assetsDir, "remote-connections-settings-test.js"),
@@ -2085,13 +2092,16 @@ test("remote mobile feature patch report records feature metadata and partial wa
         ),
       );
       fs.writeFileSync(
+        path.join(assetsDir, APP_SERVER_MANAGER_ASSET),
+        syntheticAppServerManagerSignalsBundle() + syntheticAppServerManagerStatusBundle(),
+      );
+      fs.writeFileSync(
         path.join(assetsDir, "app-server-manager-signals-test.js"),
         syntheticAppServerManagerSignalsBundle().replace(
           "if(!this.conversations.get(r)){z.error(`Received turn/completed for unknown conversation`,{safe:{conversationId:r},sensitive:{}});break}",
           "if(!this.conversations.get(r)){z.error(`Received turn/completed for unknown conversation`,{safe:{id:r},sensitive:{}});break}",
-        ) + syntheticAppServerManagerStatusBundle(),
+        ),
       );
-      fs.writeFileSync(path.join(assetsDir, PROJECTLESS_REMOTE_TASK_ASSET), syntheticSidebarProjectGroupsBundle());
       fs.writeFileSync(path.join(assetsDir, "codex-mobile-setup-flow-test.js"), syntheticMobileSetupFlowCopyBundle());
       fs.writeFileSync(path.join(assetsDir, "use-codex-mobile-connected-settings-test.js"), syntheticMobileConnectedSettingsBundle());
 
@@ -2111,8 +2121,8 @@ test("remote mobile feature patch report records feature metadata and partial wa
         (patch) => patch.name === "linux-app-server-conversation-hydration",
       );
       assert.equal(hydrationPatch.sourceKind, "core");
-      assert.equal(hydrationPatch.status, "applied-with-warnings");
-      assert.ok(hydrationPatch.warnings.some((warning) => warning.includes("unknown turn/completed needle")));
+      assert.equal(hydrationPatch.status, "applied");
+      assert.equal(hydrationPatch.warnings, undefined);
 
       const featureHydrationPatch = report.patches.find(
         (patch) => patch.name === "feature:remote-mobile-control:linux-remote-mobile-conversation-hydration",
@@ -2397,8 +2407,8 @@ test("remote mobile control feature participates in ASAR patching and reports", 
         fs.writeFileSync(path.join(buildDir, "main.js"), source);
         fs.writeFileSync(path.join(buildDir, "workspace-root-drop-handler-test.js"), syntheticAppServerLaunchBundle());
         fs.writeFileSync(
-          path.join(assetsDir, "remote-connection-visibility-test.js"),
-          syntheticRemoteConnectionVisibilityBundle(),
+          path.join(assetsDir, REMOTE_CONTROL_GATE_ASSET),
+          syntheticRemoteConnectionVisibilityBundle() + syntheticSidebarProjectGroupsBundle(),
         );
         fs.writeFileSync(
           path.join(assetsDir, "remote-control-connections-visibility-test.js"),
@@ -2420,8 +2430,12 @@ test("remote mobile control feature participates in ASAR patching and reports", 
           syntheticMobileConnectedSettingsBundle(),
         );
         fs.writeFileSync(
-          path.join(assetsDir, "app-server-manager-signals-test.js"),
+          path.join(assetsDir, APP_SERVER_MANAGER_ASSET),
           syntheticAppServerManagerSignalsBundle() + syntheticAppServerManagerStatusBundle(),
+        );
+        fs.writeFileSync(
+          path.join(assetsDir, "app-server-manager-signals-test.js"),
+          syntheticAppServerManagerSignalsBundle(),
         );
         fs.writeFileSync(
           path.join(assetsDir, "app-main-test.js"),
@@ -2429,11 +2443,6 @@ test("remote mobile control feature participates in ASAR patching and reports", 
             syntheticAppMainEnablementBridgeBundle() +
             syntheticAppMainActiveStatusBundle(),
         );
-        fs.writeFileSync(
-          path.join(assetsDir, PROJECTLESS_REMOTE_TASK_ASSET),
-          syntheticSidebarProjectGroupsBundle(),
-        );
-
         const report = createPatchReport();
         patchExtractedApp(tempApp, { report });
 
@@ -2447,7 +2456,7 @@ test("remote mobile control feature participates in ASAR patching and reports", 
           "utf8",
         );
         const patchedRemoteConnectionVisibilityFile = fs.readFileSync(
-          path.join(assetsDir, "remote-connection-visibility-test.js"),
+          path.join(assetsDir, REMOTE_CONTROL_GATE_ASSET),
           "utf8",
         );
         const patchedAppMainFile = fs.readFileSync(
@@ -2467,7 +2476,7 @@ test("remote mobile control feature participates in ASAR patching and reports", 
           "utf8",
         );
         const patchedSignalsFile = fs.readFileSync(
-          path.join(assetsDir, "app-server-manager-signals-test.js"),
+          path.join(assetsDir, APP_SERVER_MANAGER_ASSET),
           "utf8",
         );
         const patchedSidebarProjectGroupsFile = fs.readFileSync(
@@ -2476,9 +2485,8 @@ test("remote mobile control feature participates in ASAR patching and reports", 
         );
         assert.match(patchedFile, /codexLinuxRemoteControlDeviceKeyClient/);
         assert.match(patchedFile, /n\.kind===`local`&&process\.platform!==`linux`/);
-        assert.match(patchedAppServerLaunchFile, /codexLinuxRemoteMobileAppServerProxyCommand/);
-        assert.match(patchedAppServerLaunchFile, /codex_cli_command:codexLinuxRemoteMobileAppServerProxyCommand\(\)/);
-        assert.match(patchedAppServerLaunchFile, /`app-server`,`proxy`/);
+        assert.match(patchedAppServerLaunchFile, /codexLinuxRemoteMobileAppServerArgs/);
+        assert.match(patchedAppServerLaunchFile, /`--remote-control`/);
         assert.match(patchedRemoteConnectionVisibilityFile, /codexLinuxRemoteControlLoadGateEnabled/);
         assert.match(patchedAppMainFile, /\.remote_control=!0/);
         assert.match(patchedVisibilityFile, /navigator\.userAgent\.includes\(`Linux`\)/);

@@ -136,4 +136,7 @@ case "$health_json" in
 esac
 
 wrapper_note "attached to shared app-server via unix socket (CODEX_SHARED_ATTACH_DISABLE=1 to opt out)"
-exec "$real_codex" "$@" --remote unix://
+# A remote app-server cannot infer the invoking client's working directory.
+# Pass it explicitly so new interactive sessions use the caller's project,
+# rather than the directory inherited by the long-lived shared daemon.
+exec "$real_codex" -C "$PWD" "$@" --remote unix://

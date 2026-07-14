@@ -128,9 +128,10 @@ function lastCall(sandbox) {
   return calls.length > 0 ? calls[calls.length - 1] : null;
 }
 
-function runWrapper(sandbox, args, envOverrides = {}) {
+function runWrapper(sandbox, args, envOverrides = {}, options = {}) {
   return spawnSync(path.join(sandbox.wrapperBin, "codex"), args, {
     encoding: "utf8",
+    cwd: options.cwd,
     env: {
       PATH: `${sandbox.wrapperBin}:${sandbox.realBin}:/usr/bin:/bin`,
       HOME: sandbox.home,
@@ -307,7 +308,7 @@ test("wrapper attaches bare TUI when daemon is healthy", async () => {
     await withControlSocket(sandbox, async () => {
       const result = runWrapper(sandbox, [], { FAKE_DAEMON_JSON: RUNNING_JSON });
       assert.equal(result.status, 0);
-      assert.equal(lastCall(sandbox), "--remote unix://");
+      assert.equal(lastCall(sandbox), `-C ${process.cwd()} --remote unix://`);
       assert.match(result.stderr, /attached to shared app-server/);
     });
   } finally {
@@ -323,11 +324,31 @@ test("wrapper attaches resume and prompt positional", async () => {
         FAKE_DAEMON_JSON: RUNNING_JSON,
       });
       assert.equal(result.status, 0);
-      assert.equal(lastCall(sandbox), "resume some-session --remote unix://");
+      assert.equal(lastCall(sandbox), `-C ${process.cwd()} resume some-session --remote unix://`);
 
       result = runWrapper(sandbox, ["fix the failing test"], { FAKE_DAEMON_JSON: RUNNING_JSON });
       assert.equal(result.status, 0);
-      assert.equal(lastCall(sandbox), "fix the failing test --remote unix://");
+      assert.equal(lastCall(sandbox), `-C ${process.cwd()} fix the failing test --remote unix://`);
+    });
+  } finally {
+    sandbox.cleanup();
+  }
+});
+
+test("wrapper sends the invoking directory to the shared app-server", async () => {
+  const sandbox = makeSandbox();
+  const projectDir = path.join(sandbox.root, "project with spaces");
+  fs.mkdirSync(projectDir);
+  try {
+    await withControlSocket(sandbox, async () => {
+      const result = runWrapper(
+        sandbox,
+        [],
+        { FAKE_DAEMON_JSON: RUNNING_JSON },
+        { cwd: projectDir },
+      );
+      assert.equal(result.status, 0, result.stderr);
+      assert.equal(lastCall(sandbox), `-C ${projectDir} --remote unix://`);
     });
   } finally {
     sandbox.cleanup();

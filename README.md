@@ -368,6 +368,7 @@ Full list: [Troubleshooting](docs/troubleshooting.md).
 - [GitHub CLI auth in app-launched shells](docs/github-cli-auth.md)
 - [Linux Features architecture](docs/linux-features-architecture.md)
 - [Wayland input focus investigation](docs/wayland-input-focus-investigation.md)
+- [Pegged renderer CPU investigation](docs/pegged-cpu-investigation.md)
 - [Webview server evaluation](docs/webview-server-evaluation.md)
 - [Launcher performance notes](docs/launcher-performance.md)
 

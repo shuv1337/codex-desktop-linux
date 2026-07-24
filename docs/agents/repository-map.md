@@ -320,5 +320,9 @@ plus a native package plus `codex-update-manager`.
 - `docs/wayland-input-focus-investigation.md` and
   `docs/linux-chronicle-skysight.md`
   Focused investigation and integration notes for Linux-specific workflows.
+- `docs/pegged-cpu-investigation.md`
+  Live root-cause analysis of renderer CPU saturation on long automation
+  sessions, including the safe renderer-kill procedure and CDP profiling
+  runbook.
 - `docs/webview-server-evaluation.md` and `docs/launcher-performance.md`
   Decision records for the webview server and launcher performance defaults.
